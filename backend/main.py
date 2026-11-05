@@ -71,12 +71,9 @@ def get_settings():
     if not row:
         return {}
     d = dict(row)
-    # Mask API key for security
+    # Never expose any characters of the API key
     key = d.get("gemini_api_key") or ""
-    if key and len(key) > 8:
-        d["gemini_api_key_masked"] = key[:4] + "..." + key[-4:]
-    else:
-        d["gemini_api_key_masked"] = ""
+    d["gemini_api_key_configured"] = bool(key)
     d.pop("gemini_api_key", None)
     return d
 

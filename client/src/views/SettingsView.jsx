@@ -109,7 +109,7 @@ export default function SettingsView() {
                 <input
                   type="text"
                   disabled
-                  value={settings?.gemini_api_key_masked ? `●●●●●●●●●● (${settings.gemini_api_key_masked})` : 'No API key configured'}
+                  value={settings?.gemini_api_key_configured ? '●●●●●●●●●●●●●●●● (Configured & Protected)' : 'No API key configured'}
                   className="w-full max-w-md px-3.5 py-2.5 bg-[#F8F9FA] border border-[#E2E8F0] rounded-xl text-xs font-mono text-[#64748B]"
                 />
                 <button

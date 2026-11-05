@@ -4,25 +4,35 @@ const API_BASE = '/api';
 
 export async function request(endpoint, options = {}) {
   const url = `${API_BASE}${endpoint}`;
-  const response = await fetch(url, {
-    ...options,
-    headers: {
-      ...(options.headers || {}),
-    },
-  });
-
-  if (!response.ok) {
-    let errorDetail = 'Network request failed';
-    try {
-      const errJson = await response.json();
-      errorDetail = errJson.detail || errJson.message || JSON.stringify(errJson);
-    } catch {
-      errorDetail = await response.text();
-    }
-    throw new Error(errorDetail || `HTTP error ${response.status}`);
+  let response;
+  try {
+    response = await fetch(url, {
+      ...options,
+      headers: {
+        ...(options.headers || {}),
+      },
+    });
+  } catch (netErr) {
+    throw new Error(`Cannot connect to backend server: ${netErr.message}`);
   }
 
-  return response.json();
+  const rawText = await response.text();
+  let data = null;
+  try {
+    data = rawText ? JSON.parse(rawText) : null;
+  } catch {
+    data = null;
+  }
+
+  if (!response.ok) {
+    let errorDetail =
+      (data && (data.detail || data.message)) ||
+      (rawText && rawText.length < 200 ? rawText : `Server returned status ${response.status}`);
+    if (typeof errorDetail === 'object') errorDetail = JSON.stringify(errorDetail);
+    throw new Error(errorDetail);
+  }
+
+  return data;
 }
 
 export const api = {

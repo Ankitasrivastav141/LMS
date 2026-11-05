@@ -3,8 +3,13 @@ import os
 import json
 from datetime import datetime
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "lms.db")
-UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "uploads")
+IS_VERCEL = bool(os.getenv("VERCEL"))
+if IS_VERCEL:
+    DB_PATH = "/tmp/lms.db"
+    UPLOAD_DIR = "/tmp/uploads"
+else:
+    DB_PATH = os.path.join(os.path.dirname(__file__), "lms.db")
+    UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 def get_db():
