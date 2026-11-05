@@ -74,3 +74,12 @@ From the project root:
 python run_app.py
 ```
 Then open your browser at **http://localhost:8000**
+
+---
+
+### Method 3: Deploying on Vercel
+1. Import your GitHub repository `Ankitasrivastav141/LMS` into Vercel.
+2. In your Vercel Project Settings -> **Environment Variables**, add:
+   - **Key**: `GEMINI_API_KEY`
+   - **Value**: Your Gemini API key
+3. Vercel automatically deploys the frontend static assets and mounts the Python API serverless function via `vercel.json` and `api/index.py`.
