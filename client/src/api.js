@@ -1,8 +1,17 @@
-// API client for My Learning Space backend
+// Hybrid API client for My Learning Space
+// Seamlessly uses Python FastAPI backend when running locally,
+// or falls back to Client-Side Storage & Gemini Engine when deployed on static hosts (Vercel, etc.)
+
+import { clientStorage } from './clientStorage';
 
 const API_BASE = '/api';
+let useClientFallback = false;
 
 export async function request(endpoint, options = {}) {
+  if (useClientFallback) {
+    throw new Error('USE_FALLBACK');
+  }
+
   const url = `${API_BASE}${endpoint}`;
   let response;
   try {
@@ -13,7 +22,14 @@ export async function request(endpoint, options = {}) {
       },
     });
   } catch (netErr) {
-    throw new Error(`Cannot connect to backend server: ${netErr.message}`);
+    useClientFallback = true;
+    throw new Error('USE_FALLBACK');
+  }
+
+  // If 404 (common on Vercel when backend isn't mounted), switch to client engine
+  if (response.status === 404) {
+    useClientFallback = true;
+    throw new Error('USE_FALLBACK');
   }
 
   const rawText = await response.text();
@@ -35,45 +51,65 @@ export async function request(endpoint, options = {}) {
   return data;
 }
 
+// Wrapper that calls backend first, and falls back to clientStorage on 404 or connection failure
+function wrap(serverFn, fallbackFn) {
+  return async (...args) => {
+    if (useClientFallback) {
+      return fallbackFn(...args);
+    }
+    try {
+      return await serverFn(...args);
+    } catch (err) {
+      if (err.message === 'USE_FALLBACK' || err.message.includes('NOT_FOUND') || err.message.includes('404')) {
+        useClientFallback = true;
+        return fallbackFn(...args);
+      }
+      throw err;
+    }
+  };
+}
+
 export const api = {
   // Health & Settings
-  getHealth: () => request('/health'),
-  getSettings: () => request('/settings'),
-  updateSettings: (data) => request('/settings', {
+  getHealth: wrap(() => request('/health'), clientStorage.getHealth),
+  getSettings: wrap(() => request('/settings'), clientStorage.getSettings),
+  updateSettings: wrap((data) => request('/settings', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
-  }),
-  testGemini: (apiKey) => request('/settings/test', {
+  }), clientStorage.updateSettings),
+  testGemini: wrap((apiKey) => request('/settings/test', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ gemini_api_key: apiKey }),
-  }),
+  }), clientStorage.testGemini),
 
   // Dashboard
-  getDashboard: () => request('/dashboard'),
+  getDashboard: wrap(() => request('/dashboard'), clientStorage.getDashboard),
 
   // Subjects
-  getSubjects: (params = {}) => {
+  getSubjects: wrap((params = {}) => {
     const q = new URLSearchParams(params).toString();
     return request(`/subjects${q ? `?${q}` : ''}`);
-  },
-  createSubject: (data) => request('/subjects', {
+  }, clientStorage.getSubjects),
+
+  createSubject: wrap((data) => request('/subjects', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
-  }),
-  getSubjectDetails: (id) => request(`/subjects/${id}`),
-  updateSubject: (id, data) => request(`/subjects/${id}`, {
+  }), clientStorage.createSubject),
+
+  getSubjectDetails: wrap((id) => request(`/subjects/${id}`), clientStorage.getSubjectDetails),
+  updateSubject: wrap((id, data) => request(`/subjects/${id}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
-  }),
-  deleteSubject: (id) => request(`/subjects/${id}`, { method: 'DELETE' }),
+  }), clientStorage.updateSubject),
+  deleteSubject: wrap((id) => request(`/subjects/${id}`, { method: 'DELETE' }), clientStorage.deleteSubject),
 
   // Study Materials
-  getMaterials: (subjectId) => request(`/subjects/${subjectId}/materials`),
-  uploadMaterials: (subjectId, files) => {
+  getMaterials: wrap((subjectId) => request(`/subjects/${subjectId}/materials`), clientStorage.getMaterials),
+  uploadMaterials: wrap((subjectId, files) => {
     const formData = new FormData();
     for (let i = 0; i < files.length; i++) {
       formData.append('files', files[i]);
@@ -82,81 +118,81 @@ export const api = {
       method: 'POST',
       body: formData,
     });
-  },
-  getExtractedContent: (materialId) => request(`/materials/${materialId}/content`),
-  retryMaterial: (materialId) => request(`/materials/${materialId}/retry`, { method: 'POST' }),
-  deleteMaterial: (materialId) => request(`/materials/${materialId}`, { method: 'DELETE' }),
-  getDownloadUrl: (materialId) => `${API_BASE}/materials/${materialId}/download`,
+  }, clientStorage.uploadMaterials),
+  getExtractedContent: wrap((materialId) => request(`/materials/${materialId}/content`), clientStorage.getExtractedContent),
+  retryMaterial: wrap((materialId) => request(`/materials/${materialId}/retry`, { method: 'POST' }), clientStorage.retryMaterial),
+  deleteMaterial: wrap((materialId) => request(`/materials/${materialId}`, { method: 'DELETE' }), clientStorage.deleteMaterial),
+  getDownloadUrl: (materialId) => (useClientFallback ? '#' : `/api/materials/${materialId}/download`),
 
   // Topics
-  getTopics: (subjectId) => request(`/subjects/${subjectId}/topics`),
-  organizeTopics: (subjectId) => request(`/subjects/${subjectId}/topics/organize`, { method: 'POST' }),
-  updateTopic: (topicId, data) => request(`/topics/${topicId}`, {
+  getTopics: wrap((subjectId) => request(`/subjects/${subjectId}/topics`), clientStorage.getTopics),
+  organizeTopics: wrap((subjectId) => request(`/subjects/${subjectId}/topics/organize`, { method: 'POST' }), clientStorage.organizeTopics),
+  updateTopic: wrap((topicId, data) => request(`/topics/${topicId}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
-  }),
-  deleteTopic: (topicId) => request(`/topics/${topicId}`, { method: 'DELETE' }),
+  }), clientStorage.updateTopic),
+  deleteTopic: wrap((topicId) => request(`/topics/${topicId}`, { method: 'DELETE' }), clientStorage.deleteTopic),
 
   // AI Notes
-  getAINotes: (subjectId) => request(`/subjects/${subjectId}/notes`),
-  generateAINotes: (subjectId, data) => request(`/subjects/${subjectId}/notes/generate`, {
+  getAINotes: wrap((subjectId) => request(`/subjects/${subjectId}/notes`), clientStorage.getAINotes),
+  generateAINotes: wrap((subjectId, data) => request(`/subjects/${subjectId}/notes/generate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
-  }),
-  updateAINote: (noteId, data) => request(`/notes/${noteId}`, {
+  }), clientStorage.generateAINotes),
+  updateAINote: wrap((noteId, data) => request(`/notes/${noteId}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
-  }),
-  deleteAINote: (noteId) => request(`/notes/${noteId}`, { method: 'DELETE' }),
+  }), clientStorage.updateAINote),
+  deleteAINote: wrap((noteId) => request(`/notes/${noteId}`, { method: 'DELETE' }), clientStorage.deleteAINote),
 
   // Self Notes
-  getSelfNotes: (params = {}) => {
+  getSelfNotes: wrap((params = {}) => {
     const q = new URLSearchParams(params).toString();
     return request(`/self-notes${q ? `?${q}` : ''}`);
-  },
-  createSelfNote: (data) => request('/self-notes', {
+  }, clientStorage.getSelfNotes),
+  createSelfNote: wrap((data) => request('/self-notes', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
-  }),
-  updateSelfNote: (noteId, data) => request(`/self-notes/${noteId}`, {
+  }), clientStorage.createSelfNote),
+  updateSelfNote: wrap((noteId, data) => request(`/self-notes/${noteId}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
-  }),
-  deleteSelfNote: (noteId) => request(`/self-notes/${noteId}`, { method: 'DELETE' }),
+  }), clientStorage.updateSelfNote),
+  deleteSelfNote: wrap((noteId) => request(`/self-notes/${noteId}`, { method: 'DELETE' }), clientStorage.deleteSelfNote),
 
   // Quizzes
-  getQuizzes: (subjectId) => request(`/subjects/${subjectId}/quizzes`),
-  generateQuiz: (subjectId) => request(`/subjects/${subjectId}/quizzes/generate`, { method: 'POST' }),
-  getQuizForAttempt: (quizId) => request(`/quizzes/${quizId}`),
-  submitQuizAttempt: (quizId, data) => request(`/quizzes/${quizId}/attempt`, {
+  getQuizzes: wrap((subjectId) => request(`/subjects/${subjectId}/quizzes`), clientStorage.getQuizzes),
+  generateQuiz: wrap((subjectId) => request(`/subjects/${subjectId}/quizzes/generate`, { method: 'POST' }), clientStorage.generateQuiz),
+  getQuizForAttempt: wrap((quizId) => request(`/quizzes/${quizId}`), clientStorage.getQuizForAttempt),
+  submitQuizAttempt: wrap((quizId, data) => request(`/quizzes/${quizId}/attempt`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
-  }),
+  }), clientStorage.submitQuizAttempt),
 
   // Quiz History
-  getQuizHistory: (subjectId) => {
+  getQuizHistory: wrap((subjectId) => {
     const q = subjectId ? `?subject_id=${subjectId}` : '';
     return request(`/quiz-history${q}`);
-  },
-  getQuizAttemptReview: (attemptId) => request(`/quiz-history/${attemptId}`),
+  }, clientStorage.getQuizHistory),
+  getQuizAttemptReview: wrap((attemptId) => request(`/quiz-history/${attemptId}`), clientStorage.getQuizAttemptReview),
 
   // Study Timer
-  saveStudySession: (data) => request('/timer/session', {
+  saveStudySession: wrap((data) => request('/timer/session', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
-  }),
-  getRecentStudySessions: () => request('/timer/recent'),
+  }), clientStorage.saveStudySession),
+  getRecentStudySessions: wrap(() => request('/timer/recent'), clientStorage.getRecentStudySessions),
 
   // Analytics
-  getAnalytics: () => request('/analytics'),
+  getAnalytics: wrap(() => request('/analytics'), clientStorage.getAnalytics),
 
   // Search
-  search: (query) => request(`/search?q=${encodeURIComponent(query)}`),
+  search: wrap((query) => request(`/search?q=${encodeURIComponent(query)}`), clientStorage.search),
 };
