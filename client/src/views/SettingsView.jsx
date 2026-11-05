@@ -38,9 +38,18 @@ export default function SettingsView() {
   };
 
   const handleTestKey = async () => {
+    const keyToTest = newApiKey.trim();
+    if (!keyToTest && !settings?.gemini_api_key_configured) {
+      setTestStatus({
+        loading: false,
+        success: false,
+        message: "Please paste your Gemini API key in the 'Update / Change Gemini API Key' field below first, then click Test Connection.",
+      });
+      return;
+    }
     setTestStatus({ loading: true, message: 'Testing connection to Google Gemini API...' });
     try {
-      const res = await api.testGemini(newApiKey.trim() || undefined);
+      const res = await api.testGemini(keyToTest || undefined);
       setTestStatus({ success: true, message: res.message || 'Connected successfully!' });
     } catch (err) {
       setTestStatus({ success: false, message: err.message });
@@ -109,14 +118,14 @@ export default function SettingsView() {
                 <input
                   type="text"
                   disabled
-                  value={settings?.gemini_api_key_configured ? '●●●●●●●●●●●●●●●● (Configured & Protected)' : 'No API key configured'}
+                  value={settings?.gemini_api_key_configured ? '●●●●●●●●●●●●●●●● (Configured & Protected)' : 'No API key configured (Enter your key below)'}
                   className="w-full max-w-md px-3.5 py-2.5 bg-[#F8F9FA] border border-[#E2E8F0] rounded-xl text-xs font-mono text-[#64748B]"
                 />
                 <button
                   type="button"
                   onClick={handleTestKey}
                   disabled={testStatus?.loading}
-                  className="px-4 py-2 bg-[#191A23] hover:bg-black text-white rounded-xl text-xs font-bold transition-all shrink-0"
+                  className="px-4 py-2 bg-[#191A23] hover:bg-black text-white rounded-xl text-xs font-bold transition-all shrink-0 btn-bounce"
                 >
                   {testStatus?.loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Test Connection'}
                 </button>
@@ -131,11 +140,11 @@ export default function SettingsView() {
                 type="password"
                 value={newApiKey}
                 onChange={(e) => setNewApiKey(e.target.value)}
-                placeholder="Enter new Gemini API Key to replace current..."
+                placeholder="Paste your Gemini API Key here (starts with AQ...)"
                 className="w-full max-w-md px-3.5 py-2.5 bg-[#F8F9FA] border border-[#E2E8F0] rounded-xl text-xs font-mono text-[#191A23] outline-none focus:border-[#E52521]"
               />
               <p className="text-[11px] text-[#94A3B8] mt-1">
-                Keys are never sent or exposed to frontend client code in plain text.
+                Keys are never sent or exposed to anyone in plain text. Click "Save All Preferences" below after entering.
               </p>
             </div>
 

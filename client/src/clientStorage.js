@@ -45,7 +45,12 @@ function setStored(key, value) {
 
 function getApiKey() {
   const settings = getStored(STORAGE_KEYS.SETTINGS, {});
-  return settings.gemini_api_key || DEFAULT_KEY;
+  return (
+    settings.gemini_api_key ||
+    localStorage.getItem('mls_gemini_api_key') ||
+    import.meta.env.VITE_GEMINI_API_KEY ||
+    ''
+  );
 }
 
 function logActivity(type, title, details = '', subjectId = null) {
@@ -127,22 +132,30 @@ export const clientStorage = {
       pomodoro_short_break: 5,
       pomodoro_long_break: 15,
     });
+    const key = getApiKey();
     return {
       ...s,
-      gemini_api_key_configured: true,
+      gemini_api_key_configured: Boolean(key && key.trim()),
     };
   },
 
   updateSettings: async (payload) => {
     const current = getStored(STORAGE_KEYS.SETTINGS, {});
     const updated = { ...current, ...payload };
+    if (payload.gemini_api_key && payload.gemini_api_key.trim()) {
+      localStorage.setItem('mls_gemini_api_key', payload.gemini_api_key.trim());
+      updated.gemini_api_key = payload.gemini_api_key.trim();
+    }
     setStored(STORAGE_KEYS.SETTINGS, updated);
     return { message: 'Settings updated successfully' };
   },
 
   testGemini: async (testKey) => {
-    const key = testKey || getApiKey();
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${key}`;
+    const key = (testKey && testKey.trim()) || getApiKey();
+    if (!key || !key.trim()) {
+      throw new Error("No API key provided. Please paste your Gemini API key in the 'Update / Change Gemini API Key' field below first.");
+    }
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${key.trim()}`;
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -152,7 +165,12 @@ export const clientStorage = {
       return { success: true, message: 'Successfully connected to Google Gemini API!' };
     }
     const err = await res.text();
-    throw new Error(`Gemini connection error: ${err.slice(0, 150)}`);
+    let msg = err;
+    try {
+      const errJson = JSON.parse(err);
+      msg = errJson.error?.message || err;
+    } catch {}
+    throw new Error(`Gemini connection error: ${msg}`);
   },
 
   // Dashboard
