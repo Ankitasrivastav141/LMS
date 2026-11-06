@@ -1,5 +1,6 @@
 // Fallback Client-Side Storage & Gemini Engine for static web hosting (Vercel, Netlify, etc.)
 // Ensures 100% functionality without backend server dependencies.
+import { extractFileContent } from './fileExtractor';
 
 const STORAGE_KEYS = {
   SUBJECTS: 'mls_subjects',
@@ -112,6 +113,36 @@ function cleanJsonResponse(text) {
   const match = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
   if (match) return match[1].trim();
   return text;
+}
+
+function extractJsonArray(text) {
+  text = text.trim();
+  const fence = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+  if (fence) text = fence[1].trim();
+
+  const firstB = text.indexOf('[');
+  const lastB = text.lastIndexOf(']');
+  if (firstB !== -1 && lastB !== -1 && lastB > firstB) {
+    const rawArr = text.substring(firstB, lastB + 1);
+    try {
+      return JSON.parse(rawArr);
+    } catch {
+      const cleaned = rawArr.replace(/,\s*([}\]])/g, '$1');
+      return JSON.parse(cleaned);
+    }
+  }
+
+  const firstBrace = text.indexOf('{');
+  const lastBrace = text.lastIndexOf('}');
+  if (firstBrace !== -1 && lastBrace !== -1) {
+    try {
+      const obj = JSON.parse(text.substring(firstBrace, lastBrace + 1));
+      if (Array.isArray(obj)) return obj;
+      if (obj.questions && Array.isArray(obj.questions)) return obj.questions;
+    } catch {}
+  }
+
+  throw new Error('AI response did not contain a valid JSON array of questions.');
 }
 
 export const clientStorage = {
@@ -392,30 +423,23 @@ export const clientStorage = {
       const matId = crypto.randomUUID ? crypto.randomUUID() : 'mat_' + Date.now() + '_' + i;
       const ext = file.name.split('.').pop().toLowerCase();
 
-      // Read text content from file
-      let textContent = '';
-      try {
-        textContent = await file.text();
-      } catch {
-        textContent = `Content for ${file.name}`;
+      // Extract real slide text and structure using JSZip / fileExtractor
+      const parsedSlides = await extractFileContent(file);
+
+      // Save each extracted slide into persistent storage
+      for (const slide of parsedSlides) {
+        extracted.push({
+          id: crypto.randomUUID ? crypto.randomUUID() : 'sl_' + Date.now() + '_' + Math.random(),
+          material_id: matId,
+          subject_id: subjectId,
+          item_type: 'slide',
+          item_index: slide.item_index,
+          title: slide.title,
+          content: slide.content,
+          tables_json: '[]',
+          filename: file.name,
+        });
       }
-
-      // Clean readable text
-      const cleanText = textContent.replace(/[\x00-\x09\x0B\x0C\x0E-\x1F]/g, ' ').slice(0, 10000);
-
-      // Create slide extracts
-      const slide1Id = crypto.randomUUID ? crypto.randomUUID() : 'sl_' + Date.now();
-      extracted.push({
-        id: slide1Id,
-        material_id: matId,
-        subject_id: subjectId,
-        item_type: 'slide',
-        item_index: 1,
-        title: file.name.replace(/\.[^/.]+$/, ''),
-        content: cleanText.length > 50 ? cleanText : `Core study concepts extracted from ${file.name}`,
-        tables_json: '[]',
-        filename: file.name,
-      });
 
       const rec = {
         id: matId,
@@ -425,8 +449,8 @@ export const clientStorage = {
         file_type: ext,
         upload_date: new Date().toISOString(),
         processing_status: 'processed',
-        slide_count: 3,
-        summary: `${ext.toUpperCase()} document processed successfully.`,
+        slide_count: parsedSlides.length || 1,
+        summary: `${ext.toUpperCase()} document processed successfully (${parsedSlides.length} slides extracted).`,
       };
 
       materials.unshift(rec);
@@ -747,68 +771,84 @@ FORMAT AS HIGH-QUALITY EDUCATIONAL MARKDOWN WITH:
       });
   },
 
-  generateQuiz: async (subjectId) => {
+  generateQuiz: async (subjectId, options = {}) => {
     const sub = getStored(STORAGE_KEYS.SUBJECTS, []).find((s) => s.id === subjectId);
     if (!sub) throw new Error('Subject not found');
 
-    const extracted = getStored(STORAGE_KEYS.EXTRACTED, []).filter((e) => e.subject_id === subjectId);
-    const sourceText = extracted.map((e) => `[${e.filename} Slide ${e.item_index}: ${e.title}] ${e.content.slice(0, 250)}`).join('\n');
+    let extracted = getStored(STORAGE_KEYS.EXTRACTED, []).filter((e) => e.subject_id === subjectId);
+    let quizTitle = `${sub.name} - 10 MCQ Practice Quiz`;
 
-    const prompt = `You are an MBA exam designer.
-Create EXACTLY 10 multiple-choice practice questions based on "${sub.name}".
-SOURCE MATERIAL:
-${sourceText || sub.name}
+    if (options && options.material_id) {
+      const mat = getStored(STORAGE_KEYS.MATERIALS, []).find((m) => m.id === options.material_id);
+      if (mat) {
+        extracted = extracted.filter((e) => e.material_id === options.material_id || e.filename === mat.filename);
+        quizTitle = `${mat.filename.replace(/\.[^/.]+$/, '')} - 10 MCQ Quiz`;
+      }
+    }
 
-RETURN STRICTLY A JSON ARRAY OF 10 OBJECTS:
+    const slideSummaries = extracted.slice(0, 40).map((e) =>
+      `[${e.filename} | Slide ${e.item_index}: ${e.title}]\n${e.content ? e.content.slice(0, 600) : ''}`
+    ).join('\n\n');
+
+    const prompt = `You are a top-tier MBA professor designing an exam on "${sub.name}".
+Create an examination of EXACTLY 10 Multiple Choice Questions (MCQs) based DIRECTLY on the actual topics, concepts, models, and definitions from the lecture slides below.
+
+CRITICAL INSTRUCTIONS:
+1. Every question MUST test a specific, real concept, theory, formula, or principle taught in the slides (e.g. for Economics, test specific topics like Marginal Utility, Price Elasticity, Fiscal Policy, Monopolistic Competition, Inflation, etc.).
+2. ABSOLUTELY NEVER use generic placeholders like "Sample Question", "Sample MBA Practice Question", "Framework Analysis", or "Value Creation".
+3. Each question must have EXACTLY 4 realistic, distinct options (A, B, C, D).
+4. Specify the correct_index (0, 1, 2, or 3).
+5. In "explanation", explain why the correct choice is right according to the theory and why distractors are wrong.
+6. In "source_reference", mention the slide topic or theoretical model tested.
+
+LECTURE SLIDE CONTENT:
+${slideSummaries || sub.name + ' Core MBA Syllabus Concepts'}
+
+RETURN ONLY A VALID RAW JSON ARRAY OF 10 OBJECTS (WITHOUT markdown ticks, code blocks, or commentary):
 [
   {
     "question_index": 1,
-    "question_text": "Question here?",
-    "options": ["Option A", "Option B", "Option C", "Option D"],
+    "question_text": "Detailed question directly testing a principle?",
+    "options": ["Plausible Option A", "Plausible Option B", "Plausible Option C", "Plausible Option D"],
     "correct_index": 0,
-    "explanation": "Why correct answer is right and why others are wrong.",
-    "source_reference": "Lecture Material"
+    "explanation": "Why correct option is right and others are incorrect.",
+    "source_reference": "Concept / Slide title"
   }
 ]`;
 
     const raw = await callGeminiDirect(prompt);
-    const cleaned = cleanJsonResponse(raw);
-    let questions = [];
+    let questions;
     try {
-      questions = JSON.parse(cleaned);
-      if (!Array.isArray(questions)) questions = questions.questions || [];
-    } catch {
-      questions = Array(10).fill(0).map((_, i) => ({
-        question_index: i + 1,
-        question_text: `Sample MBA Practice Question ${i + 1} for ${sub.name}`,
-        options: ['Framework Analysis', 'Core Competency', 'Competitive Advantage', 'Value Creation'],
-        correct_index: 0,
-        explanation: 'Option A directly reflects the core curriculum principle.',
-        source_reference: 'Course Material',
-      }));
+      questions = extractJsonArray(raw);
+    } catch (parseErr) {
+      throw new Error(`AI generated response could not be parsed into 10 MCQs: ${parseErr.message}. Please click Retry.`);
+    }
+
+    if (!Array.isArray(questions) || questions.length === 0) {
+      throw new Error("Gemini AI was unable to generate questions from the slides. Please retry.");
     }
 
     const quizId = crypto.randomUUID ? crypto.randomUUID() : 'qz_' + Date.now();
     const now = new Date().toISOString();
-    const title = `${sub.name} - 10 MCQ Practice Quiz`;
 
     const formattedQuestions = questions.slice(0, 10).map((q, idx) => ({
       id: crypto.randomUUID ? crypto.randomUUID() : `qq_${quizId}_${idx}`,
       quiz_id: quizId,
       question_index: idx + 1,
       question_text: q.question_text || `Question ${idx + 1}`,
-      options: q.options || ['A', 'B', 'C', 'D'],
-      correct_index: typeof q.correct_index === 'number' ? q.correct_index : 0,
-      explanation: q.explanation || 'Refer to lecture slides for context.',
-      source_reference: q.source_reference || 'Lecture Material',
+      options: Array.isArray(q.options) && q.options.length === 4 ? q.options : ['Option A', 'Option B', 'Option C', 'Option D'],
+      correct_index: typeof q.correct_index === 'number' && q.correct_index >= 0 && q.correct_index <= 3 ? q.correct_index : 0,
+      explanation: q.explanation || 'Refer to the lecture topic for context.',
+      source_reference: q.source_reference || `${sub.name} Lecture`,
     }));
 
     const quizzes = getStored(STORAGE_KEYS.QUIZZES, []);
     quizzes.unshift({
       id: quizId,
       subject_id: subjectId,
-      title,
-      total_questions: 10,
+      material_id: options.material_id || null,
+      title: quizTitle,
+      total_questions: formattedQuestions.length,
       created_at: now,
     });
     setStored(STORAGE_KEYS.QUIZZES, quizzes);
@@ -816,8 +856,8 @@ RETURN STRICTLY A JSON ARRAY OF 10 OBJECTS:
     const allQuestions = getStored(STORAGE_KEYS.QUIZ_QUESTIONS, []);
     setStored(STORAGE_KEYS.QUIZ_QUESTIONS, [...allQuestions, ...formattedQuestions]);
 
-    logActivity('quiz_generated', `Generated 10-MCQ Quiz for ${sub.name}`, '', subjectId);
-    return { quiz_id: quizId, title, total_questions: 10 };
+    logActivity('quiz_generated', `Generated 10-MCQ Quiz for ${sub.name}: '${quizTitle}'`, '', subjectId);
+    return { quiz_id: quizId, title: quizTitle, total_questions: formattedQuestions.length };
   },
 
   getQuizForAttempt: async (quizId) => {

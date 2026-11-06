@@ -429,11 +429,11 @@ export default function SubjectWorkspaceView({ subjectId, initialTab = 'overview
   };
 
   // ---------------- QUIZ ----------------
-  const handleGenerateQuiz = async () => {
+  const handleGenerateQuiz = async (materialId = null) => {
     setGeneratingQuiz(true);
     try {
-      const res = await api.generateQuiz(subjectId);
-      alert(`10-MCQ Practice Quiz created successfully!`);
+      const res = await api.generateQuiz(subjectId, materialId ? { material_id: materialId } : {});
+      alert(`10-MCQ Practice Quiz created successfully from your lecture topics!`);
       const updatedList = await api.getQuizzes(subjectId);
       setQuizzes(updatedList);
       // Auto-launch quiz
@@ -848,11 +848,25 @@ export default function SubjectWorkspaceView({ subjectId, initialTab = 'overview
                           <button
                             onClick={() => handleGenerateNotesForMaterial(mat)}
                             disabled={generatingNotes}
-                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100 border border-amber-200 text-xs font-bold text-[#B45309] transition-colors shadow-xs disabled:opacity-50"
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100 border border-amber-200 text-xs font-bold text-[#B45309] transition-colors shadow-xs disabled:opacity-50 cursor-pointer"
                             title="Generate AI Notes specifically for this presentation"
                           >
                             <Sparkles className="w-3.5 h-3.5 text-[#FDB813]" />
-                            <span>Generate AI Notes</span>
+                            <span>Notes</span>
+                          </button>
+                        )}
+                        {isProcessed && (
+                          <button
+                            onClick={() => {
+                              setActiveTab('quiz');
+                              handleGenerateQuiz(mat.id);
+                            }}
+                            disabled={generatingQuiz}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-purple-50 hover:bg-purple-100 border border-purple-200 text-xs font-bold text-purple-700 transition-colors shadow-xs disabled:opacity-50 cursor-pointer"
+                            title="Generate 10 MCQ Practice Quiz specifically from this presentation"
+                          >
+                            <HelpCircle className="w-3.5 h-3.5 text-purple-600" />
+                            <span>Quiz</span>
                           </button>
                         )}
                         {isProcessed && (
@@ -1451,14 +1465,35 @@ export default function SubjectWorkspaceView({ subjectId, initialTab = 'overview
                     Practice questions generated strictly from your uploaded study materials.
                   </p>
                 </div>
-                <button
-                  onClick={handleGenerateQuiz}
-                  disabled={generatingQuiz || materials.length === 0}
-                  className="flex items-center gap-2 bg-[#E52521] hover:bg-[#C51916] text-white px-5 py-2.5 rounded-xl font-bold text-xs shadow-playful-red transition-all btn-bounce disabled:opacity-50"
-                >
-                  {generatingQuiz ? <Loader2 className="w-4 h-4 animate-spin" /> : <HelpCircle className="w-4 h-4" />}
-                  <span>{generatingQuiz ? 'Generating 10 MCQs...' : 'Generate 10 MCQ Quiz'}</span>
-                </button>
+                <div className="flex items-center gap-2 flex-wrap">
+                  {materials.length > 0 && (
+                    <select
+                      defaultValue=""
+                      onChange={(e) => {
+                        if (e.target.value) {
+                          handleGenerateQuiz(e.target.value);
+                          e.target.value = '';
+                        }
+                      }}
+                      className="bg-[#F8F9FA] border border-[#CBD5E1] rounded-xl px-3 py-2 text-xs font-semibold text-[#191A23] outline-none cursor-pointer"
+                    >
+                      <option value="">Quiz from specific PPT...</option>
+                      {materials.map((m) => (
+                        <option key={m.id} value={m.id}>
+                          📄 {m.filename}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                  <button
+                    onClick={() => handleGenerateQuiz()}
+                    disabled={generatingQuiz || materials.length === 0}
+                    className="flex items-center gap-2 bg-[#E52521] hover:bg-[#C51916] text-white px-5 py-2.5 rounded-xl font-bold text-xs shadow-playful-red transition-all btn-bounce disabled:opacity-50"
+                  >
+                    {generatingQuiz ? <Loader2 className="w-4 h-4 animate-spin" /> : <HelpCircle className="w-4 h-4" />}
+                    <span>{generatingQuiz ? 'Generating 10 MCQs...' : 'Generate 10 MCQ Quiz'}</span>
+                  </button>
+                </div>
               </div>
 
               {quizzes.length === 0 ? (

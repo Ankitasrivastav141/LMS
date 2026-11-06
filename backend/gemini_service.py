@@ -208,7 +208,29 @@ Ensure the tone is professional, encouraging, readable, and structured with clea
         system_instruction="You are an expert MBA educator. Write exhaustive, beautifully structured notes based strictly on provided curriculum slides."
     )
 
-def generate_quiz_with_gemini(api_key: str, subject_name: str, extracted_items: List[Dict[str, Any]], preferred_model: str = "gemini-3.5-flash") -> List[Dict[str, Any]]:
+def extract_json_array_from_text(text: str) -> list:
+    """Robustly extracts and parses a JSON array from AI output."""
+    cleaned = clean_json_response(text)
+    first_b = cleaned.find('[')
+    last_b = cleaned.rfind(']')
+    if first_b != -1 and last_b != -1 and last_b > first_b:
+        raw_arr = cleaned[first_b:last_b + 1]
+        try:
+            return json.loads(raw_arr)
+        except Exception:
+            repaired = re.sub(r',\s*([}\]])', r'\1', raw_arr)
+            return json.loads(repaired)
+    first_br = cleaned.find('{')
+    last_br = cleaned.rfind('}')
+    if first_br != -1 and last_br != -1:
+        obj = json.loads(cleaned[first_br:last_br + 1])
+        if isinstance(obj, list):
+            return obj
+        if isinstance(obj, dict) and "questions" in obj:
+            return obj["questions"]
+    return json.loads(cleaned)
+
+def generate_quiz_with_gemini(api_key: str, subject_name: str, extracted_items: List[Dict[str, Any]], preferred_model: str = "gemini-3.5-flash-lite") -> List[Dict[str, Any]]:
     """
     Generates exactly 10 multiple-choice questions grounded in the extracted PPT/document content.
     """
@@ -259,9 +281,8 @@ Each object must match this schema:
         system_instruction="You are an MBA exam designer. Return strictly a JSON array of 10 MCQs."
     )
 
-    cleaned = clean_json_response(response_text)
     try:
-        questions = json.loads(cleaned)
+        questions = extract_json_array_from_text(response_text)
         if isinstance(questions, dict) and "questions" in questions:
             questions = questions["questions"]
         if not isinstance(questions, list):

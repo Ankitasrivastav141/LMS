@@ -934,8 +934,11 @@ def list_subject_quizzes(subject_id: str):
     conn.close()
     return quizzes
 
+class GenerateQuizRequest(BaseModel):
+    material_id: Optional[str] = None
+
 @app.post("/api/subjects/{subject_id}/quizzes/generate")
-def generate_quiz(subject_id: str):
+def generate_quiz(subject_id: str, payload: Optional[GenerateQuizRequest] = None):
     conn = get_db()
     cursor = conn.cursor()
     cursor.execute("SELECT name FROM subjects WHERE id = ?", (subject_id,))
@@ -944,13 +947,31 @@ def generate_quiz(subject_id: str):
         conn.close()
         raise HTTPException(status_code=404, detail="Subject not found")
 
-    cursor.execute("""
-    SELECT ec.*, sm.filename
-    FROM extracted_content ec
-    JOIN study_materials sm ON ec.material_id = sm.id
-    WHERE ec.subject_id = ?
-    ORDER BY sm.filename, ec.item_index
-    """, (subject_id,))
+    mat_id = payload.material_id if payload else None
+    title = f"{sub_row['name']} - 10 MCQ Practice Quiz"
+
+    if mat_id:
+        cursor.execute("SELECT filename FROM study_materials WHERE id = ?", (mat_id,))
+        mat_row = cursor.fetchone()
+        if mat_row:
+            clean_fn = os.path.splitext(mat_row["filename"])[0]
+            title = f"{clean_fn} - 10 MCQ Practice Quiz"
+
+        cursor.execute("""
+        SELECT ec.*, sm.filename
+        FROM extracted_content ec
+        JOIN study_materials sm ON ec.material_id = sm.id
+        WHERE ec.subject_id = ? AND ec.material_id = ?
+        ORDER BY ec.item_index
+        """, (subject_id, mat_id))
+    else:
+        cursor.execute("""
+        SELECT ec.*, sm.filename
+        FROM extracted_content ec
+        JOIN study_materials sm ON ec.material_id = sm.id
+        WHERE ec.subject_id = ?
+        ORDER BY sm.filename, ec.item_index
+        """, (subject_id,))
     extracted_items = [dict(row) for row in cursor.fetchall()]
 
     if not extracted_items:
@@ -966,7 +987,6 @@ def generate_quiz(subject_id: str):
 
     quiz_id = str(uuid.uuid4())
     now = datetime.now().isoformat()
-    title = f"{sub_row['name']} - 10 MCQ Practice Quiz"
 
     cursor.execute("""
     INSERT INTO quizzes (id, subject_id, title, description, total_questions, created_at)
