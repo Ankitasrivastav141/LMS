@@ -72,7 +72,10 @@ export default function SubjectWorkspaceView({ subjectId, initialTab = 'overview
   const [selfNoteTitle, setSelfNoteTitle] = useState('');
   const [selfNoteContent, setSelfNoteContent] = useState('');
   const [selfNoteSavedStatus, setSelfNoteSavedStatus] = useState('Saved');
+  const [selfNoteMode, setSelfNoteMode] = useState('edit'); // 'edit' | 'preview'
+  const [selfNoteCopied, setSelfNoteCopied] = useState(false);
   const autosaveTimerRef = useRef(null);
+  const selfNoteTextareaRef = useRef(null);
 
   // Quiz Attempt states
   const [activeQuiz, setActiveQuiz] = useState(null);
@@ -334,7 +337,7 @@ export default function SubjectWorkspaceView({ subjectId, initialTab = 'overview
       const res = await api.createSelfNote({
         subject_id: subjectId,
         title: 'Untitled Note',
-        content: '<p>Start writing your MBA thoughts and lecture takeaways here...</p>',
+        content: '',
       });
       const updated = await api.getSelfNotes({ subject_id: subjectId });
       setSelfNotes(updated);
@@ -343,6 +346,7 @@ export default function SubjectWorkspaceView({ subjectId, initialTab = 'overview
       setSelfNoteTitle(created.title);
       setSelfNoteContent(created.content);
       setSelfNoteSavedStatus('Saved');
+      setSelfNoteMode('edit');
     } catch (err) {
       alert(`Error creating note: ${err.message}`);
     }
@@ -358,15 +362,49 @@ export default function SubjectWorkspaceView({ subjectId, initialTab = 'overview
           title: newTitle,
           content: newContent,
         });
-        setSelfNoteSavedStatus('Saved at ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
-        // update list
+        setSelfNoteSavedStatus('Saved ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
         setSelfNotes((prev) =>
           prev.map((n) => (n.id === activeSelfNote.id ? { ...n, title: newTitle, content: newContent } : n))
         );
       } catch (err) {
         setSelfNoteSavedStatus('Error saving');
       }
-    }, 800);
+    }, 500);
+  };
+
+  const handleSaveSelfNoteNow = async () => {
+    if (!activeSelfNote) return;
+    if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+    setSelfNoteSavedStatus('Saving...');
+    try {
+      await api.updateSelfNote(activeSelfNote.id, {
+        title: selfNoteTitle,
+        content: selfNoteContent,
+      });
+      setSelfNoteSavedStatus('Saved ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+      setSelfNotes((prev) =>
+        prev.map((n) => (n.id === activeSelfNote.id ? { ...n, title: selfNoteTitle, content: selfNoteContent } : n))
+      );
+    } catch (err) {
+      setSelfNoteSavedStatus('Error saving');
+    }
+  };
+
+  const insertSelfNoteFormatting = (prefix, suffix = '') => {
+    const textarea = selfNoteTextareaRef.current;
+    if (!textarea) return;
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const current = selfNoteContent;
+    const selected = current.substring(start, end);
+    const replacement = prefix + selected + suffix;
+    const newContent = current.substring(0, start) + replacement + current.substring(end);
+    setSelfNoteContent(newContent);
+    triggerSelfNoteAutosave(selfNoteTitle, newContent);
+    setTimeout(() => {
+      textarea.focus();
+      textarea.setSelectionRange(start + prefix.length, end + prefix.length);
+    }, 0);
   };
 
   const handleDeleteSelfNote = async (noteId) => {
@@ -1251,7 +1289,7 @@ export default function SubjectWorkspaceView({ subjectId, initialTab = 'overview
           <div className="lg:col-span-8 bg-white rounded-3xl border border-[#E8ECF2] shadow-xs p-6 flex flex-col space-y-4">
             {activeSelfNote ? (
               <>
-                <div className="flex items-center justify-between pb-3 border-b border-[#F1F5F9]">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-[#F1F5F9]">
                   <input
                     type="text"
                     value={selfNoteTitle}
@@ -1260,27 +1298,136 @@ export default function SubjectWorkspaceView({ subjectId, initialTab = 'overview
                       triggerSelfNoteAutosave(e.target.value, selfNoteContent);
                     }}
                     placeholder="Note title..."
-                    className="font-extrabold text-xl text-[#191A23] bg-transparent border-none outline-none flex-1"
+                    className="font-extrabold text-xl text-[#191A23] bg-transparent border-none outline-none flex-1 placeholder:text-[#CBD5E1]"
                   />
-                  <div className="flex items-center gap-2 text-xs font-semibold text-[#64748B]">
-                    <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-                    <span>{selfNoteSavedStatus}</span>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <button
+                      onClick={handleSaveSelfNoteNow}
+                      className="flex items-center gap-1.5 px-3 py-1 rounded-xl bg-red-50 hover:bg-red-100 border border-red-200 text-[#E52521] text-xs font-bold transition-all cursor-pointer shadow-xs"
+                      title="Save note now"
+                    >
+                      <Save className="w-3.5 h-3.5" />
+                      <span>Save</span>
+                    </button>
+                    <button
+                      onClick={() => {
+                        navigator.clipboard.writeText(`# ${selfNoteTitle}\n\n${selfNoteContent}`);
+                        setSelfNoteCopied(true);
+                        setTimeout(() => setSelfNoteCopied(false), 2000);
+                      }}
+                      className="p-1.5 rounded-xl bg-[#F8F9FA] hover:bg-[#E2E8F0] text-[#64748B] hover:text-[#191A23] transition-colors cursor-pointer"
+                      title="Copy note"
+                    >
+                      {selfNoteCopied ? <Check className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4" />}
+                    </button>
+                    <div className="flex items-center gap-1.5 text-[11px] font-semibold text-[#64748B] bg-[#F8F9FA] px-2.5 py-1 rounded-xl border border-[#E8ECF2]">
+                      <span className={`w-2 h-2 rounded-full ${selfNoteSavedStatus.startsWith('Saved') ? 'bg-emerald-500' : 'bg-amber-500 animate-pulse'}`}></span>
+                      <span>{selfNoteSavedStatus}</span>
+                    </div>
                   </div>
                 </div>
 
-                {/* Editor Content Textarea */}
-                <textarea
-                  value={selfNoteContent}
-                  onChange={(e) => {
-                    setSelfNoteContent(e.target.value);
-                    triggerSelfNoteAutosave(selfNoteTitle, e.target.value);
-                  }}
-                  placeholder="Write your study notes, key insights, formulas, and frameworks here..."
-                  className="flex-1 w-full bg-[#F8F9FA] p-5 rounded-2xl border border-[#E8ECF2] outline-none text-sm leading-relaxed text-[#191A23] focus:border-[#E52521] resize-none"
-                />
+                {/* Formatting Toolbar */}
+                <div className="flex items-center justify-between gap-2 bg-[#F8F9FA] p-2 rounded-2xl border border-[#E8ECF2] flex-wrap">
+                  <div className="flex items-center gap-1 flex-wrap">
+                    <button
+                      type="button"
+                      onClick={() => insertSelfNoteFormatting('# ')}
+                      className="px-2 py-1 rounded-lg bg-white border border-[#E2E8F0] text-xs font-black text-[#191A23] hover:bg-[#E2E8F0] transition-colors cursor-pointer"
+                    >
+                      H1
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => insertSelfNoteFormatting('## ')}
+                      className="px-2 py-1 rounded-lg bg-white border border-[#E2E8F0] text-xs font-black text-[#191A23] hover:bg-[#E2E8F0] transition-colors cursor-pointer"
+                    >
+                      H2
+                    </button>
+                    <span className="w-px h-4 bg-[#CBD5E1] mx-1"></span>
+                    <button
+                      type="button"
+                      onClick={() => insertSelfNoteFormatting('**', '**')}
+                      className="px-2 py-1 rounded-lg bg-white border border-[#E2E8F0] text-xs font-bold text-[#191A23] hover:bg-[#E2E8F0] transition-colors cursor-pointer"
+                    >
+                      B
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => insertSelfNoteFormatting('*', '*')}
+                      className="px-2 py-1 rounded-lg bg-white border border-[#E2E8F0] text-xs italic font-bold text-[#191A23] hover:bg-[#E2E8F0] transition-colors cursor-pointer"
+                    >
+                      I
+                    </button>
+                    <span className="w-px h-4 bg-[#CBD5E1] mx-1"></span>
+                    <button
+                      type="button"
+                      onClick={() => insertSelfNoteFormatting('- ')}
+                      className="px-2 py-1 rounded-lg bg-white border border-[#E2E8F0] text-xs font-bold text-[#191A23] hover:bg-[#E2E8F0] transition-colors cursor-pointer"
+                    >
+                      • List
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => insertSelfNoteFormatting('`', '`')}
+                      className="px-2 py-1 rounded-lg bg-white border border-[#E2E8F0] text-xs font-mono text-[#191A23] hover:bg-[#E2E8F0] transition-colors cursor-pointer"
+                    >
+                      Code
+                    </button>
+                  </div>
+
+                  <div className="flex items-center gap-1 bg-white p-0.5 rounded-xl border border-[#E2E8F0]">
+                    <button
+                      type="button"
+                      onClick={() => setSelfNoteMode('edit')}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                        selfNoteMode === 'edit'
+                          ? 'bg-[#191A23] text-white shadow-xs'
+                          : 'text-[#64748B] hover:text-[#191A23]'
+                      }`}
+                    >
+                      Write
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSelfNoteMode('preview')}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1 ${
+                        selfNoteMode === 'preview'
+                          ? 'bg-[#191A23] text-white shadow-xs'
+                          : 'text-[#64748B] hover:text-[#191A23]'
+                      }`}
+                    >
+                      <Eye className="w-3 h-3" />
+                      <span>Preview</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Editor Content Textarea / Preview */}
+                {selfNoteMode === 'edit' ? (
+                  <textarea
+                    ref={selfNoteTextareaRef}
+                    value={selfNoteContent}
+                    onChange={(e) => {
+                      setSelfNoteContent(e.target.value);
+                      triggerSelfNoteAutosave(selfNoteTitle, e.target.value);
+                    }}
+                    placeholder="Write your study notes, key insights, formulas, and frameworks here... (Markdown supported)"
+                    className="flex-1 w-full bg-[#F8F9FA] p-5 rounded-2xl border border-[#E8ECF2] outline-none text-sm leading-relaxed text-[#191A23] focus:border-[#E52521] focus:bg-white resize-none font-mono"
+                    style={{ minHeight: '360px' }}
+                  />
+                ) : (
+                  <div className="flex-1 w-full bg-[#F8F9FA] p-6 rounded-2xl border border-[#E8ECF2] overflow-y-auto prose prose-sm max-w-none text-[#191A23] leading-relaxed" style={{ minHeight: '360px' }}>
+                    {selfNoteContent ? (
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{selfNoteContent}</ReactMarkdown>
+                    ) : (
+                      <p className="text-xs text-[#94A3B8] italic">No content to preview.</p>
+                    )}
+                  </div>
+                )}
               </>
             ) : (
-              <div className="flex-1 flex flex-col items-center justify-center text-center text-[#94A3B8]">
+              <div className="flex-1 flex flex-col items-center justify-center text-center text-[#94A3B8] py-16">
                 <Edit3 className="w-12 h-12 text-[#94A3B8]/40 mb-3" />
                 <h3 className="font-bold text-base text-[#191A23]">No Note Selected</h3>
                 <p className="text-xs mt-1">Create or select a note on the left to write and autosave.</p>

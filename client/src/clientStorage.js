@@ -652,51 +652,77 @@ FORMAT AS HIGH-QUALITY EDUCATIONAL MARKDOWN WITH:
     let sNotes = getStored(STORAGE_KEYS.SELF_NOTES, []);
     const subs = getStored(STORAGE_KEYS.SUBJECTS, []);
 
-    if (params.subject_id) {
+    if (params.subject_id && params.subject_id !== 'all') {
       sNotes = sNotes.filter((n) => n.subject_id === params.subject_id);
+    }
+    if (params.favorites_only) {
+      sNotes = sNotes.filter((n) => n.is_favorite === 1);
     }
     if (params.search) {
       const s = params.search.toLowerCase();
-      sNotes = sNotes.filter((n) => n.title.toLowerCase().includes(s) || n.content.toLowerCase().includes(s));
+      sNotes = sNotes.filter((n) => (n.title || '').toLowerCase().includes(s) || (n.content || '').toLowerCase().includes(s));
     }
 
     return sNotes.map((n) => {
       const sub = subs.find((s) => s.id === n.subject_id);
       return {
         ...n,
-        subject_name: sub?.name || 'General',
+        subject_name: sub?.name || 'Personal Notes',
         subject_color: sub?.color || '#E52521',
       };
     });
   },
 
-  createSelfNote: async (data) => {
+  createSelfNote: async (data = {}) => {
     const sNotes = getStored(STORAGE_KEYS.SELF_NOTES, []);
+    const subs = getStored(STORAGE_KEYS.SUBJECTS, []);
     const id = crypto.randomUUID ? crypto.randomUUID() : 'sn_' + Date.now();
     const now = new Date().toISOString();
+    const subId = data.subject_id || (subs[0]?.id || 'general');
+    const title = (data.title && data.title.trim()) || 'Untitled Note';
+    const sub = subs.find((s) => s.id === subId);
+
     const note = {
       id,
-      subject_id: data.subject_id,
-      title: data.title.trim(),
-      content: data.content,
-      is_favorite: 0,
+      subject_id: subId,
+      title,
+      content: data.content || '',
+      is_favorite: data.is_favorite ? 1 : 0,
       created_at: now,
       updated_at: now,
+      subject_name: sub?.name || 'Personal Notes',
+      subject_color: sub?.color || '#E52521',
     };
     sNotes.unshift(note);
     setStored(STORAGE_KEYS.SELF_NOTES, sNotes);
-    logActivity('self_note_created', `Created personal note: '${note.title}'`, '', data.subject_id);
+    logActivity('self_note_created', `Created personal note: '${title}'`, '', subId);
     return note;
   },
 
-  updateSelfNote: async (noteId, data) => {
+  updateSelfNote: async (noteId, data = {}) => {
     const sNotes = getStored(STORAGE_KEYS.SELF_NOTES, []);
+    const subs = getStored(STORAGE_KEYS.SUBJECTS, []);
     const idx = sNotes.findIndex((n) => n.id === noteId);
     if (idx !== -1) {
-      sNotes[idx] = { ...sNotes[idx], ...data, updated_at: new Date().toISOString() };
+      const updated = {
+        ...sNotes[idx],
+        ...data,
+        updated_at: new Date().toISOString(),
+      };
+      if (data.title !== undefined) {
+        updated.title = (data.title && data.title.trim()) || 'Untitled Note';
+      }
+      sNotes[idx] = updated;
       setStored(STORAGE_KEYS.SELF_NOTES, sNotes);
+      const sub = subs.find((s) => s.id === updated.subject_id);
+      return {
+        ...updated,
+        subject_name: sub?.name || 'Personal Notes',
+        subject_color: sub?.color || '#E52521',
+        message: 'Self note autosaved',
+      };
     }
-    return { message: 'Self note autosaved' };
+    return { message: 'Self note updated' };
   },
 
   deleteSelfNote: async (noteId) => {

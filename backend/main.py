@@ -815,9 +815,9 @@ def delete_ai_note(note_id: str):
 # ----------------- SELF NOTES -----------------
 
 class SelfNoteCreate(BaseModel):
-    subject_id: str
-    title: str
-    content: str
+    subject_id: Optional[str] = "general"
+    title: Optional[str] = "Untitled Note"
+    content: Optional[str] = ""
     is_favorite: Optional[int] = 0
 
 @app.get("/api/self-notes")
@@ -825,9 +825,9 @@ def list_self_notes(subject_id: Optional[str] = None, search: Optional[str] = No
     conn = get_db()
     cursor = conn.cursor()
     query = """
-    SELECT sn.*, s.name as subject_name, s.color as subject_color
+    SELECT sn.*, COALESCE(s.name, 'Personal Notes') as subject_name, COALESCE(s.color, '#E52521') as subject_color
     FROM self_notes sn
-    JOIN subjects s ON sn.subject_id = s.id
+    LEFT JOIN subjects s ON sn.subject_id = s.id
     WHERE 1=1
     """
     params = []
@@ -848,8 +848,7 @@ def list_self_notes(subject_id: Optional[str] = None, search: Optional[str] = No
 
 @app.post("/api/self-notes")
 def create_self_note(payload: SelfNoteCreate):
-    if not payload.title.strip():
-        raise HTTPException(status_code=400, detail="Note title is required.")
+    title = (payload.title or "").strip() or "Untitled Note"
     note_id = str(uuid.uuid4())
     now = datetime.now().isoformat()
     conn = get_db()
@@ -857,16 +856,26 @@ def create_self_note(payload: SelfNoteCreate):
     cursor.execute("""
     INSERT INTO self_notes (id, subject_id, title, content, is_favorite, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?)
-    """, (note_id, payload.subject_id, payload.title.strip(), payload.content, payload.is_favorite or 0, now, now))
+    """, (note_id, payload.subject_id or "general", title, payload.content or "", payload.is_favorite or 0, now, now))
     conn.commit()
     conn.close()
 
-    log_activity("self_note_created", f"Created personal note: '{payload.title.strip()}'", subject_id=payload.subject_id)
-    return {"id": note_id, "title": payload.title, "message": "Self note created"}
+    log_activity("self_note_created", f"Created personal note: '{title}'", subject_id=payload.subject_id)
+    return {
+        "id": note_id,
+        "subject_id": payload.subject_id or "general",
+        "title": title,
+        "content": payload.content or "",
+        "is_favorite": payload.is_favorite or 0,
+        "created_at": now,
+        "updated_at": now,
+        "message": "Self note created"
+    }
 
 class SelfNoteUpdate(BaseModel):
     title: Optional[str] = None
     content: Optional[str] = None
+    subject_id: Optional[str] = None
     is_favorite: Optional[int] = None
 
 @app.put("/api/self-notes/{note_id}")
@@ -878,10 +887,13 @@ def update_self_note(note_id: str, payload: SelfNoteUpdate):
     params = []
     if payload.title is not None:
         updates.append("title = ?")
-        params.append(payload.title.strip())
+        params.append(payload.title.strip() or "Untitled Note")
     if payload.content is not None:
         updates.append("content = ?")
         params.append(payload.content)
+    if payload.subject_id is not None:
+        updates.append("subject_id = ?")
+        params.append(payload.subject_id)
     if payload.is_favorite is not None:
         updates.append("is_favorite = ?")
         params.append(payload.is_favorite)
