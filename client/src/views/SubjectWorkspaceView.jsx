@@ -28,7 +28,8 @@ import {
   CheckSquare,
   Square,
   Star,
-  Layers
+  Layers,
+  Plus
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import ReactMarkdown from 'react-markdown';
@@ -1264,7 +1265,7 @@ export default function SubjectWorkspaceView({ subjectId, initialTab = 'overview
                       <div className="min-w-0 pr-2">
                         <p className="text-xs font-bold truncate">{note.title}</p>
                         <p className={`text-[10px] ${isSelected ? 'text-[#94A3B8]' : 'text-[#64748B]'}`}>
-                          Updated {new Date(note.updated_at).toLocaleDateString()}
+                          Updated {note.updated_at ? new Date(note.updated_at).toLocaleDateString() : 'Just now'}
                         </p>
                       </div>
                       <button
