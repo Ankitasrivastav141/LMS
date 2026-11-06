@@ -6,7 +6,7 @@ export default function SettingsView() {
   const [settings, setSettings] = useState(null);
   const [loading, setLoading] = useState(true);
   const [newApiKey, setNewApiKey] = useState('');
-  const [preferredModel, setPreferredModel] = useState('gemini-3.8-flash');
+  const [preferredModel, setPreferredModel] = useState('gemini-3.5-flash-lite');
   const [timerDefault, setTimerDefault] = useState(25);
   const [pomodoroStudy, setPomodoroStudy] = useState(25);
   const [pomodoroShort, setPomodoroShort] = useState(5);
@@ -178,10 +178,10 @@ export default function SettingsView() {
                 onChange={(e) => setPreferredModel(e.target.value)}
                 className="w-full max-w-md bg-[#F8F9FA] border border-[#E2E8F0] rounded-xl text-xs font-bold text-[#191A23] px-3.5 py-2.5 outline-none cursor-pointer"
               >
-                <option value="gemini-3.8-flash">gemini-3.8-flash (Latest Flash Model)</option>
-                <option value="gemini-3.5-flash">gemini-3.5-flash (High Reliability Fallback)</option>
+                <option value="gemini-3.5-flash-lite">gemini-3.5-flash-lite (Fast & High Reliability - Recommended)</option>
+                <option value="gemini-3.1-flash-lite-preview">gemini-3.1-flash-lite-preview</option>
+                <option value="gemini-3-flash-preview">gemini-3-flash-preview</option>
                 <option value="gemini-flash-latest">gemini-flash-latest</option>
-                <option value="gemini-3.1-flash-lite">gemini-3.1-flash-lite (Fast & Lightweight)</option>
               </select>
               <p className="text-[11px] text-[#94A3B8] mt-1">
                 Our backend automatically uses graceful multi-tier fallback if a model experiences temporary high demand.

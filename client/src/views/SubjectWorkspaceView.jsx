@@ -229,12 +229,14 @@ export default function SubjectWorkspaceView({ subjectId, initialTab = 'overview
   };
 
   // ---------------- AI NOTES ----------------
-  const handleGenerateNotes = async (topicId = null, customTitle = null) => {
+  const handleGenerateNotes = async (topicId = null, customTitle = null, materialId = null, filename = null) => {
     setGeneratingNotes(true);
     try {
       const newNote = await api.generateAINotes(subjectId, {
         topic_id: topicId,
         custom_title: customTitle,
+        material_id: materialId,
+        filename: filename,
       });
       const updatedNotes = await api.getAINotes(subjectId);
       setAiNotes(updatedNotes);
@@ -243,6 +245,60 @@ export default function SubjectWorkspaceView({ subjectId, initialTab = 'overview
       alert(`AI Notes generated successfully for "${newNote.title}"!`);
     } catch (err) {
       alert(`AI Notes generation failed: ${err.message}`);
+    } finally {
+      setGeneratingNotes(false);
+    }
+  };
+
+  const handleGenerateNotesForMaterial = async (mat) => {
+    setGeneratingNotes(true);
+    try {
+      const cleanName = mat.filename.replace(/\.[^/.]+$/, '');
+      const newNote = await api.generateAINotes(subjectId, {
+        material_id: mat.id,
+        filename: mat.filename,
+        custom_title: `Notes: ${cleanName}`,
+      });
+      const updatedNotes = await api.getAINotes(subjectId);
+      setAiNotes(updatedNotes);
+      setSelectedNote(newNote);
+      setEditedNoteContent(newNote.content);
+      setActiveTab('ai-notes');
+      alert(`AI Notes generated specifically for "${mat.filename}"!`);
+    } catch (err) {
+      alert(`Failed to generate notes for ${mat.filename}: ${err.message}`);
+    } finally {
+      setGeneratingNotes(false);
+    }
+  };
+
+  const handleGenerateAllPPTNotes = async () => {
+    if (materials.length === 0) {
+      alert('Please upload PPT files first.');
+      return;
+    }
+    setGeneratingNotes(true);
+    let successCount = 0;
+    try {
+      for (const mat of materials) {
+        const cleanName = mat.filename.replace(/\.[^/.]+$/, '');
+        await api.generateAINotes(subjectId, {
+          material_id: mat.id,
+          filename: mat.filename,
+          custom_title: `Notes: ${cleanName}`,
+        });
+        successCount++;
+      }
+      const updatedNotes = await api.getAINotes(subjectId);
+      setAiNotes(updatedNotes);
+      if (updatedNotes.length > 0) {
+        setSelectedNote(updatedNotes[0]);
+        setEditedNoteContent(updatedNotes[0].content);
+      }
+      setActiveTab('ai-notes');
+      alert(`Successfully generated ${successCount} separate AI notes for each uploaded presentation!`);
+    } catch (err) {
+      alert(`Batch generation failed: ${err.message}`);
     } finally {
       setGeneratingNotes(false);
     }
@@ -751,6 +807,17 @@ export default function SubjectWorkspaceView({ subjectId, initialTab = 'overview
                       <div className="flex items-center gap-2 self-end sm:self-auto">
                         {isProcessed && (
                           <button
+                            onClick={() => handleGenerateNotesForMaterial(mat)}
+                            disabled={generatingNotes}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100 border border-amber-200 text-xs font-bold text-[#B45309] transition-colors shadow-xs disabled:opacity-50"
+                            title="Generate AI Notes specifically for this presentation"
+                          >
+                            <Sparkles className="w-3.5 h-3.5 text-[#FDB813]" />
+                            <span>Generate AI Notes</span>
+                          </button>
+                        )}
+                        {isProcessed && (
+                          <button
                             onClick={() => handleViewContent(mat)}
                             className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#F8F9FA] hover:bg-[#E2E8F0] text-xs font-bold text-[#191A23] transition-colors"
                           >
@@ -845,26 +912,68 @@ export default function SubjectWorkspaceView({ subjectId, initialTab = 'overview
               </p>
             </div>
 
-            <div className="flex items-center gap-2.5">
+            <div className="flex flex-wrap items-center gap-2.5">
               <button
                 onClick={handleOrganizeTopics}
                 disabled={organizingTopics || materials.length === 0}
-                className="flex items-center gap-2 bg-[#FDB813] hover:bg-[#F59E0B] text-black px-4 py-2.5 rounded-xl font-bold text-xs shadow-playful-yellow transition-all btn-bounce disabled:opacity-50"
+                className="flex items-center gap-2 bg-[#FDB813] hover:bg-[#F59E0B] text-black px-3.5 py-2 rounded-xl font-bold text-xs shadow-playful-yellow transition-all btn-bounce disabled:opacity-50"
               >
                 {organizingTopics ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
                 <span>{organizingTopics ? 'Organizing Topics...' : 'Organize Topics with AI'}</span>
               </button>
 
+              {materials.length > 0 && (
+                <button
+                  onClick={handleGenerateAllPPTNotes}
+                  disabled={generatingNotes}
+                  className="flex items-center gap-2 bg-amber-50 hover:bg-amber-100 text-[#B45309] border border-amber-300 px-3.5 py-2 rounded-xl font-bold text-xs transition-all btn-bounce disabled:opacity-50"
+                  title="Create individual AI study notes for every uploaded PPT presentation"
+                >
+                  {generatingNotes ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileText className="w-3.5 h-3.5 text-[#B45309]" />}
+                  <span>Generate Notes for All PPTs ({materials.length})</span>
+                </button>
+              )}
+
               <button
                 onClick={() => handleGenerateNotes(null, `${subject.name} - Complete MBA Notes`)}
                 disabled={generatingNotes || materials.length === 0}
-                className="flex items-center gap-2 bg-[#E52521] hover:bg-[#C51916] text-white px-4 py-2.5 rounded-xl font-bold text-xs shadow-playful-red transition-all btn-bounce disabled:opacity-50"
+                className="flex items-center gap-2 bg-[#E52521] hover:bg-[#C51916] text-white px-3.5 py-2 rounded-xl font-bold text-xs shadow-playful-red transition-all btn-bounce disabled:opacity-50"
               >
                 {generatingNotes ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
-                <span>{generatingNotes ? 'Generating Notes...' : 'Generate AI Notes'}</span>
+                <span>{generatingNotes ? 'Generating Notes...' : 'Combined Notes'}</span>
               </button>
             </div>
           </div>
+
+          {materials.length > 0 && (
+            <div className="bg-[#FFFDF9] border border-amber-200 p-3.5 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+              <div className="flex items-center gap-2">
+                <FileText className="w-4 h-4 text-amber-600 shrink-0" />
+                <span className="font-bold text-[#191A23]">Generate notes for a specific presentation:</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <select
+                  defaultValue=""
+                  className="bg-white border border-[#CBD5E1] rounded-xl px-3 py-1.5 text-xs font-semibold text-[#191A23] outline-none cursor-pointer"
+                  onChange={(e) => {
+                    if (!e.target.value) return;
+                    const mat = materials.find((m) => m.id === e.target.value);
+                    if (mat) {
+                      handleGenerateNotesForMaterial(mat);
+                      e.target.value = '';
+                    }
+                  }}
+                >
+                  <option value="">Choose a PPT presentation...</option>
+                  {materials.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      📄 {m.filename}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          )}
 
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
             {/* Left 4 Cols: Topic Explorer & Notes List */}
@@ -955,9 +1064,16 @@ export default function SubjectWorkspaceView({ subjectId, initialTab = 'overview
                         >
                           <div className="min-w-0 pr-2">
                             <p className="text-xs font-bold truncate">{n.title}</p>
-                            <p className={`text-[10px] ${isSelected ? 'text-[#94A3B8]' : 'text-[#64748B]'}`}>
-                              v{n.version} • {new Date(n.updated_at).toLocaleDateString()}
-                            </p>
+                            <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                              {n.source_files && n.source_files.length === 1 && (
+                                <span className="text-[9px] font-bold bg-amber-500/15 text-amber-700 px-1.5 py-0.5 rounded border border-amber-500/30 truncate max-w-[150px]">
+                                  📄 {n.source_files[0]}
+                                </span>
+                              )}
+                              <p className={`text-[10px] ${isSelected ? 'text-[#94A3B8]' : 'text-[#64748B]'}`}>
+                                v{n.version} • {new Date(n.updated_at).toLocaleDateString()}
+                              </p>
+                            </div>
                           </div>
                           <button
                             onClick={(e) => {

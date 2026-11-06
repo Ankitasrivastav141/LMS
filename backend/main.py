@@ -47,7 +47,7 @@ def get_current_gemini_key():
     conn.close()
     if row and row["gemini_api_key"]:
         return row["gemini_api_key"], row["preferred_model"]
-    return USER_GEMINI_KEY, "gemini-3.5-flash"
+    return USER_GEMINI_KEY, "gemini-3.5-flash-lite"
 
 # ----------------- SETTINGS & HEALTH -----------------
 
@@ -684,6 +684,7 @@ def list_ai_notes(subject_id: str):
 class GenerateNotesRequest(BaseModel):
     topic_id: Optional[str] = None
     custom_title: Optional[str] = None
+    material_id: Optional[str] = None
 
 @app.post("/api/subjects/{subject_id}/notes/generate")
 def generate_ai_notes(subject_id: str, payload: GenerateNotesRequest):
@@ -696,24 +697,44 @@ def generate_ai_notes(subject_id: str, payload: GenerateNotesRequest):
         raise HTTPException(status_code=404, detail="Subject not found")
 
     subject_name = sub_row["name"]
-    topic_title = payload.custom_title or "Comprehensive Learning Notes"
+    topic_title = payload.custom_title
     topic_desc = ""
 
     if payload.topic_id:
         cursor.execute("SELECT title, description FROM topics WHERE id = ?", (payload.topic_id,))
         top_row = cursor.fetchone()
         if top_row:
-            topic_title = top_row["title"]
+            if not topic_title:
+                topic_title = top_row["title"]
             topic_desc = top_row["description"] or ""
 
-    # Fetch extracted items
-    cursor.execute("""
-    SELECT ec.*, sm.filename
-    FROM extracted_content ec
-    JOIN study_materials sm ON ec.material_id = sm.id
-    WHERE ec.subject_id = ?
-    ORDER BY sm.filename, ec.item_index
-    """, (subject_id,))
+    if payload.material_id:
+        cursor.execute("SELECT filename FROM study_materials WHERE id = ?", (payload.material_id,))
+        mat_row = cursor.fetchone()
+        if mat_row and not topic_title:
+            clean_fn = os.path.splitext(mat_row["filename"])[0]
+            topic_title = f"Notes: {clean_fn}"
+
+    if not topic_title:
+        topic_title = "Comprehensive Learning Notes"
+
+    # Fetch extracted items (optionally isolated to specific material)
+    if payload.material_id:
+        cursor.execute("""
+        SELECT ec.*, sm.filename
+        FROM extracted_content ec
+        JOIN study_materials sm ON ec.material_id = sm.id
+        WHERE ec.subject_id = ? AND ec.material_id = ?
+        ORDER BY ec.item_index
+        """, (subject_id, payload.material_id))
+    else:
+        cursor.execute("""
+        SELECT ec.*, sm.filename
+        FROM extracted_content ec
+        JOIN study_materials sm ON ec.material_id = sm.id
+        WHERE ec.subject_id = ?
+        ORDER BY sm.filename, ec.item_index
+        """, (subject_id,))
     extracted_items = [dict(row) for row in cursor.fetchall()]
 
     if not extracted_items:

@@ -4,10 +4,10 @@ import re
 from typing import List, Dict, Any, Optional
 
 MODELS_FALLBACK = [
-    "gemini-3.5-flash",
-    "gemini-3.8-flash",
-    "gemini-flash-latest",
-    "gemini-3.1-flash-lite"
+    "gemini-3.5-flash-lite",
+    "gemini-3.1-flash-lite-preview",
+    "gemini-3-flash-preview",
+    "gemini-flash-latest"
 ]
 
 def clean_json_response(text: str) -> str:
@@ -18,7 +18,7 @@ def clean_json_response(text: str) -> str:
         return match.group(1).strip()
     return text
 
-def call_gemini(api_key: str, prompt: str, preferred_model: str = "gemini-3.5-flash", system_instruction: str = None) -> str:
+def call_gemini(api_key: str, prompt: str, preferred_model: str = "gemini-3.5-flash-lite", system_instruction: str = None) -> str:
     """
     Calls Google Gemini REST API with automated fallback across robust models.
     """
