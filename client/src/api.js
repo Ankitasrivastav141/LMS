@@ -195,4 +195,8 @@ export const api = {
 
   // Search
   search: wrap((query) => request(`/search?q=${encodeURIComponent(query)}`), clientStorage.search),
+
+  // Backup & Restore
+  exportAllData: clientStorage.exportAllData,
+  importAllData: clientStorage.importAllData,
 };

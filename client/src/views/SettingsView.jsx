@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Settings, Key, Sparkles, Check, AlertCircle, Loader2, Save, ShieldCheck, Clock } from 'lucide-react';
+import { Settings, Key, Sparkles, Check, AlertCircle, Loader2, Save, ShieldCheck, Clock, Database, Download, Upload, HardDrive } from 'lucide-react';
 import { api } from '../api';
 
 export default function SettingsView() {
@@ -15,6 +15,41 @@ export default function SettingsView() {
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [testStatus, setTestStatus] = useState(null); // { loading, success, message }
+  const [backupStatus, setBackupStatus] = useState(null);
+
+  const handleExportBackup = async () => {
+    try {
+      const data = await api.exportAllData();
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `my_learning_space_backup_${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setBackupStatus({ success: true, message: 'Complete LMS backup exported successfully!' });
+      setTimeout(() => setBackupStatus(null), 4000);
+    } catch (err) {
+      setBackupStatus({ success: false, message: `Export failed: ${err.message}` });
+    }
+  };
+
+  const handleImportBackup = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        const json = JSON.parse(event.target.result);
+        await api.importAllData(json);
+        setBackupStatus({ success: true, message: 'All subjects, materials, and notes restored! Refreshing...' });
+        setTimeout(() => window.location.reload(), 1500);
+      } catch (err) {
+        setBackupStatus({ success: false, message: `Restore failed: ${err.message}` });
+      }
+    };
+    reader.readAsText(file);
+  };
 
   useEffect(() => {
     loadSettings();
@@ -240,6 +275,62 @@ export default function SettingsView() {
               />
             </div>
           </div>
+        </div>
+
+        {/* Data Persistence, Backup & Restore Card */}
+        <div className="bg-white rounded-3xl border border-[#E8ECF2] shadow-xs p-6 space-y-4">
+          <div className="flex items-center gap-3 pb-4 border-b border-[#F1F5F9]">
+            <div className="w-10 h-10 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold">
+              <Database className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="font-extrabold text-base text-[#191A23]">Data Backup & Persistence</h2>
+              <p className="text-xs text-[#64748B]">Persistent high-capacity IndexedDB + LocalStorage sync</p>
+            </div>
+          </div>
+
+          <p className="text-xs text-[#64748B] leading-relaxed">
+            All your subjects, study materials, extracted PPT slides, AI notes, self notes, and quiz history are stored locally in your browser. Use the buttons below to export a full backup or restore your workspace across different browsers or Vercel deployment URLs.
+          </p>
+
+          <div className="flex flex-wrap items-center gap-3 pt-1">
+            <button
+              type="button"
+              onClick={handleExportBackup}
+              className="flex items-center gap-2 bg-[#F8F9FA] hover:bg-[#E2E8F0] border border-[#CBD5E1] text-[#191A23] px-4 py-2.5 rounded-xl font-bold text-xs transition-colors cursor-pointer"
+            >
+              <Download className="w-4 h-4 text-[#191A23]" />
+              <span>Export Full Backup (JSON)</span>
+            </button>
+
+            <label className="flex items-center gap-2 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-700 px-4 py-2.5 rounded-xl font-bold text-xs transition-colors cursor-pointer">
+              <Upload className="w-4 h-4 text-indigo-600" />
+              <span>Import / Restore Backup</span>
+              <input
+                type="file"
+                accept=".json"
+                onChange={handleImportBackup}
+                className="hidden"
+              />
+            </label>
+          </div>
+
+          {backupStatus && (
+            <div
+              className={`p-3 rounded-xl text-xs font-semibold flex items-center gap-2 ${
+                backupStatus.success
+                  ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                  : 'bg-red-50 text-red-800 border border-red-200'
+              }`}
+            >
+              {backupStatus.success ? (
+                <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+              ) : (
+                <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+              )}
+              <span>{backupStatus.message}</span>
+            </div>
+          )}
         </div>
 
         {/* Save Bar */}

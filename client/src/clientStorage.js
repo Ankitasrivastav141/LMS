@@ -27,6 +27,81 @@ const MODELS_FALLBACK = [
   'gemini-3-flash-preview'
 ];
 
+// High-Capacity Persistent Storage (IndexedDB + LocalStorage Sync)
+const DB_NAME = 'MyLearningSpace_DB';
+const DB_VERSION = 1;
+const STORE_NAME = 'app_store';
+
+function openDB() {
+  return new Promise((resolve) => {
+    if (typeof window === 'undefined' || !window.indexedDB) return resolve(null);
+    try {
+      const req = indexedDB.open(DB_NAME, DB_VERSION);
+      req.onupgradeneeded = (e) => {
+        const db = e.target.result;
+        if (!db.objectStoreNames.contains(STORE_NAME)) {
+          db.createObjectStore(STORE_NAME);
+        }
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => resolve(null);
+    } catch {
+      resolve(null);
+    }
+  });
+}
+
+async function idbGet(key) {
+  const db = await openDB();
+  if (!db) return null;
+  return new Promise((resolve) => {
+    try {
+      const tx = db.transaction(STORE_NAME, 'readonly');
+      const store = tx.objectStore(STORE_NAME);
+      const req = store.get(key);
+      req.onsuccess = () => resolve(req.result ?? null);
+      req.onerror = () => resolve(null);
+    } catch {
+      resolve(null);
+    }
+  });
+}
+
+async function idbSet(key, value) {
+  const db = await openDB();
+  if (!db) return;
+  try {
+    const tx = db.transaction(STORE_NAME, 'readwrite');
+    const store = tx.objectStore(STORE_NAME);
+    store.put(value, key);
+  } catch (err) {
+    console.warn('IndexedDB write error:', err);
+  }
+}
+
+// Auto-sync between IndexedDB and LocalStorage on page load
+if (typeof window !== 'undefined') {
+  (async () => {
+    try {
+      for (const k of Object.values(STORAGE_KEYS)) {
+        const localVal = localStorage.getItem(k);
+        const idbVal = await idbGet(k);
+        if (!localVal && idbVal) {
+          try {
+            localStorage.setItem(k, JSON.stringify(idbVal));
+          } catch {}
+        } else if (localVal && !idbVal) {
+          try {
+            await idbSet(k, JSON.parse(localVal));
+          } catch {}
+        }
+      }
+    } catch (e) {
+      console.warn('Storage sync initialization error:', e);
+    }
+  })();
+}
+
 function getStored(key, defaultValue = []) {
   try {
     const data = localStorage.getItem(key);
@@ -37,10 +112,29 @@ function getStored(key, defaultValue = []) {
 }
 
 function setStored(key, value) {
+  // Always persist to high-capacity IndexedDB (unlimited MBs)
+  idbSet(key, value);
+
+  // Also persist to localStorage with quota-safe protection
   try {
     localStorage.setItem(key, JSON.stringify(value));
   } catch (e) {
-    console.error('Storage write error:', e);
+    console.warn('LocalStorage quota limit reached, protecting data in IndexedDB for:', key);
+    try {
+      if (key === STORAGE_KEYS.EXTRACTED && Array.isArray(value)) {
+        // Compress text length for localStorage only (full text safe in IndexedDB)
+        const compressed = value.map((item) => ({
+          ...item,
+          content: (item.content || '').slice(0, 300),
+        }));
+        localStorage.setItem(key, JSON.stringify(compressed));
+      } else {
+        localStorage.removeItem(STORAGE_KEYS.ACTIVITIES);
+        localStorage.setItem(key, JSON.stringify(value));
+      }
+    } catch (retryErr) {
+      console.warn('LocalStorage save failed, safely preserved in IndexedDB:', retryErr);
+    }
   }
 }
 
@@ -1149,5 +1243,26 @@ RETURN ONLY A VALID RAW JSON ARRAY OF 10 OBJECTS (WITHOUT markdown ticks, code b
       total_results,
       results: { subjects, materials, ai_notes, self_notes, topics },
     };
+  },
+
+  // Full Workspace Backup & Restore
+  exportAllData: async () => {
+    const data = {};
+    for (const [name, storageKey] of Object.entries(STORAGE_KEYS)) {
+      data[storageKey] = getStored(storageKey, null);
+    }
+    return data;
+  },
+
+  importAllData: async (importedData) => {
+    if (!importedData || typeof importedData !== 'object') {
+      throw new Error('Invalid backup file format');
+    }
+    for (const [name, storageKey] of Object.entries(STORAGE_KEYS)) {
+      if (importedData[storageKey] !== undefined && importedData[storageKey] !== null) {
+        setStored(storageKey, importedData[storageKey]);
+      }
+    }
+    return { success: true, message: 'All subjects, materials, notes, and quizzes restored successfully!' };
   },
 };
