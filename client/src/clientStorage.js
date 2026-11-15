@@ -99,6 +99,11 @@ async function idbSet(key, value) {
 if (typeof window !== 'undefined') {
   (async () => {
     try {
+      // Request permanent storage from browser so data is NEVER evicted over time (even after 30+ days)
+      if (typeof navigator !== 'undefined' && navigator.storage && navigator.storage.persist) {
+        navigator.storage.persist().catch(() => {});
+      }
+
       const idbSubjects = await idbGet(STORAGE_KEYS.SUBJECTS);
       const localSubjectsStr = localStorage.getItem(STORAGE_KEYS.SUBJECTS);
       let localSubjects = null;
