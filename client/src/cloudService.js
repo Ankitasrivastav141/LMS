@@ -30,6 +30,7 @@ export function saveCloudConfig(config) {
 }
 
 let supabaseInstance = null;
+let tursoInstance = null;
 
 function getSupabase() {
   const config = getCloudConfig();
@@ -45,14 +46,65 @@ function getSupabase() {
   return supabaseInstance;
 }
 
+async function getTurso() {
+  const config = getCloudConfig();
+  if (!config.turso_url || !config.turso_token) return null;
+  if (!tursoInstance) {
+    try {
+      const { createClient } = await import('@libsql/client/web');
+      tursoInstance = createClient({
+        url: config.turso_url,
+        authToken: config.turso_token,
+      });
+      // Auto-ensure lms_store table exists in Turso
+      await tursoInstance.execute(`
+        CREATE TABLE IF NOT EXISTS lms_store (
+          key TEXT PRIMARY KEY,
+          data TEXT NOT NULL,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+      `);
+    } catch (e) {
+      console.warn('Failed to init Turso client:', e);
+      return null;
+    }
+  }
+  return tursoInstance;
+}
+
 export const cloudService = {
   isConfigured: () => {
     const config = getCloudConfig();
-    return Boolean((config.supabase_url && config.supabase_key) || (config.turso_url && config.turso_token));
+    if (config.provider === 'turso') {
+      return Boolean(config.turso_url && config.turso_token);
+    }
+    return Boolean(config.supabase_url && config.supabase_key);
   },
 
   testConnection: async (overrideConfig = null) => {
     const config = overrideConfig || getCloudConfig();
+
+    if (config.provider === 'turso') {
+      if (!config.turso_url || !config.turso_token) {
+        throw new Error('Turso Database URL and Auth Token are required.');
+      }
+      try {
+        const { createClient } = await import('@libsql/client/web');
+        const client = createClient({ url: config.turso_url, authToken: config.turso_token });
+        await client.execute('SELECT 1;');
+        // Auto-create table in Turso
+        await client.execute(`
+          CREATE TABLE IF NOT EXISTS lms_store (
+            key TEXT PRIMARY KEY,
+            data TEXT NOT NULL,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+          );
+        `);
+        return { success: true, message: 'Connected successfully to Turso Cloud Database! Table created automatically.' };
+      } catch (err) {
+        throw new Error(`Turso connection failed: ${err.message}`);
+      }
+    }
 
     if (config.provider === 'supabase' || (!config.provider && config.supabase_url)) {
       if (!config.supabase_url || !config.supabase_key) {
@@ -79,20 +131,6 @@ export const cloudService = {
       }
     }
 
-    if (config.provider === 'turso') {
-      if (!config.turso_url || !config.turso_token) {
-        throw new Error('Turso Database URL and Auth Token are required.');
-      }
-      try {
-        const { createClient } = await import('@libsql/client/web');
-        const client = createClient({ url: config.turso_url, authToken: config.turso_token });
-        await client.execute('SELECT 1;');
-        return { success: true, message: 'Connected successfully to Turso Cloud Database!' };
-      } catch (err) {
-        throw new Error(`Turso connection failed: ${err.message}`);
-      }
-    }
-
     throw new Error('No cloud database configured.');
   },
 
@@ -100,6 +138,25 @@ export const cloudService = {
   fetchCloudCollection: async (key) => {
     const config = getCloudConfig();
     if (!config.enabled && !cloudService.isConfigured()) return null;
+
+    if (config.provider === 'turso') {
+      try {
+        const client = await getTurso();
+        if (client) {
+          const res = await client.execute({
+            sql: 'SELECT data FROM lms_store WHERE key = ? LIMIT 1;',
+            args: [key],
+          });
+          if (res.rows && res.rows.length > 0) {
+            const raw = res.rows[0].data || res.rows[0][0];
+            return typeof raw === 'string' ? JSON.parse(raw) : raw;
+          }
+        }
+      } catch (e) {
+        console.warn(`Turso fetch error for ${key}:`, e);
+      }
+      return null;
+    }
 
     try {
       const client = getSupabase();
@@ -123,6 +180,22 @@ export const cloudService = {
     const config = getCloudConfig();
     if (!config.enabled && !cloudService.isConfigured()) return false;
 
+    if (config.provider === 'turso') {
+      try {
+        const client = await getTurso();
+        if (client) {
+          await client.execute({
+            sql: 'INSERT OR REPLACE INTO lms_store (key, data, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP);',
+            args: [key, JSON.stringify(data)],
+          });
+          return true;
+        }
+      } catch (e) {
+        console.warn(`Turso save error for ${key}:`, e);
+      }
+      return false;
+    }
+
     try {
       const client = getSupabase();
       if (client) {
@@ -145,6 +218,27 @@ export const cloudService = {
 
   // Migrate all local and initial data into the cloud in 1 click
   migrateAllToCloud: async (getAllDataFn) => {
+    const config = getCloudConfig();
+
+    if (config.provider === 'turso') {
+      const client = await getTurso();
+      if (!client) throw new Error('Turso database is not connected. Configure credentials first.');
+      const allData = await getAllDataFn();
+      const entries = Object.entries(allData);
+      let successCount = 0;
+
+      for (const [key, value] of entries) {
+        if (value !== undefined && value !== null) {
+          await client.execute({
+            sql: 'INSERT OR REPLACE INTO lms_store (key, data, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP);',
+            args: [key, JSON.stringify(value)],
+          });
+          successCount++;
+        }
+      }
+      return { success: true, count: successCount, total: entries.length };
+    }
+
     const client = getSupabase();
     if (!client) throw new Error('Cloud database is not connected. Configure credentials first.');
 
