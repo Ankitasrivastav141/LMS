@@ -3,6 +3,7 @@
 // or falls back to Client-Side Storage & Gemini Engine when deployed on static hosts (Vercel, etc.)
 
 import { clientStorage } from './clientStorage';
+import { cloudService } from './cloudService';
 
 const API_BASE = '/api';
 let useClientFallback = false;
@@ -193,4 +194,11 @@ export const api = {
   // Backup & Restore
   exportAllData: clientStorage.exportAllData,
   importAllData: clientStorage.importAllData,
+
+  // Cloud Database (Supabase / Turso)
+  getCloudConfig: cloudService.getCloudConfig,
+  saveCloudConfig: cloudService.saveCloudConfig,
+  testCloud: cloudService.testConnection,
+  migrateToCloud: () => cloudService.migrateAllToCloud(clientStorage.exportAllData),
+  getCloudSetupSQL: cloudService.getSetupSQL,
 };

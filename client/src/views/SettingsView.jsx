@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Settings, Key, Sparkles, Check, AlertCircle, Loader2, Save, ShieldCheck, Clock, Database, Download, Upload, HardDrive } from 'lucide-react';
+import { Settings, Key, Sparkles, Check, AlertCircle, Loader2, Save, ShieldCheck, Clock, Database, Download, Upload, HardDrive, Cloud, CloudUpload, Copy, ExternalLink } from 'lucide-react';
 import { api } from '../api';
 
 export default function SettingsView() {
@@ -51,9 +51,96 @@ export default function SettingsView() {
     reader.readAsText(file);
   };
 
+  // Cloud Database States
+  const [cloudProvider, setCloudProvider] = useState('supabase');
+  const [supabaseUrl, setSupabaseUrl] = useState('');
+  const [supabaseKey, setSupabaseKey] = useState('');
+  const [tursoUrl, setTursoUrl] = useState('');
+  const [tursoToken, setTursoToken] = useState('');
+  const [cloudStatus, setCloudStatus] = useState(null); // { loading, success, message, tableMissing }
+  const [cloudSyncStatus, setCloudSyncStatus] = useState(null); // { loading, success, message }
+  const [copiedSql, setCopiedSql] = useState(false);
+
   useEffect(() => {
     loadSettings();
+    loadCloudSettings();
   }, []);
+
+  const loadCloudSettings = () => {
+    if (api.getCloudConfig) {
+      const cfg = api.getCloudConfig();
+      if (cfg) {
+        if (cfg.provider) setCloudProvider(cfg.provider);
+        if (cfg.supabase_url) setSupabaseUrl(cfg.supabase_url);
+        if (cfg.supabase_key) setSupabaseKey(cfg.supabase_key);
+        if (cfg.turso_url) setTursoUrl(cfg.turso_url);
+        if (cfg.turso_token) setTursoToken(cfg.turso_token);
+      }
+    }
+  };
+
+  const handleSaveCloudSettings = () => {
+    const cfg = {
+      provider: cloudProvider,
+      supabase_url: supabaseUrl.trim(),
+      supabase_key: supabaseKey.trim(),
+      turso_url: tursoUrl.trim(),
+      turso_token: tursoToken.trim(),
+      enabled: Boolean((supabaseUrl && supabaseKey) || (tursoUrl && tursoToken)),
+    };
+    if (api.saveCloudConfig) {
+      api.saveCloudConfig(cfg);
+    }
+    return cfg;
+  };
+
+  const handleTestCloudConnection = async () => {
+    const cfg = handleSaveCloudSettings();
+    setCloudStatus({ loading: true, message: 'Connecting to Cloud Database...' });
+    try {
+      const res = await api.testCloud(cfg);
+      setCloudStatus({
+        loading: false,
+        success: true,
+        message: res.message,
+        tableMissing: res.tableMissing,
+      });
+    } catch (err) {
+      setCloudStatus({
+        loading: false,
+        success: false,
+        message: err.message,
+      });
+    }
+  };
+
+  const handleMigrateAllToCloud = async () => {
+    handleSaveCloudSettings();
+    setCloudSyncStatus({ loading: true, message: 'Uploading all subjects, PPTs, slides, notes, and MCQs to Cloud...' });
+    try {
+      const res = await api.migrateToCloud();
+      setCloudSyncStatus({
+        loading: false,
+        success: true,
+        message: `Successfully synced ${res.count} course data collections to Cloud Database! Data is now 100% permanent across all devices.`,
+      });
+      setTimeout(() => setCloudSyncStatus(null), 5000);
+    } catch (err) {
+      setCloudSyncStatus({
+        loading: false,
+        success: false,
+        message: err.message,
+      });
+    }
+  };
+
+  const handleCopySql = () => {
+    if (api.getCloudSetupSQL) {
+      navigator.clipboard.writeText(api.getCloudSetupSQL());
+      setCopiedSql(true);
+      setTimeout(() => setCopiedSql(false), 2500);
+    }
+  };
 
   const loadSettings = async () => {
     setLoading(true);
@@ -275,6 +362,176 @@ export default function SettingsView() {
               />
             </div>
           </div>
+        </div>
+
+        {/* Live Cloud Database Card (Supabase & Turso) */}
+        <div className="bg-white rounded-3xl border border-[#E8ECF2] shadow-xs p-6 space-y-5">
+          <div className="flex items-center justify-between gap-3 pb-4 border-b border-[#F1F5F9] flex-wrap">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold">
+                <Cloud className="w-5 h-5" />
+              </div>
+              <div>
+                <h2 className="font-extrabold text-base text-[#191A23]">Live Cloud Database (100% Permanent)</h2>
+                <p className="text-xs text-[#64748B]">Real-time cloud persistence via Supabase or Turso across all devices & professors</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 bg-[#F8F9FA] p-1 rounded-xl border border-[#E2E8F0]">
+              <button
+                type="button"
+                onClick={() => setCloudProvider('supabase')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  cloudProvider === 'supabase' ? 'bg-[#191A23] text-white shadow-xs' : 'text-[#64748B] hover:text-[#191A23]'
+                }`}
+              >
+                Supabase (Recommended)
+              </button>
+              <button
+                type="button"
+                onClick={() => setCloudProvider('turso')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  cloudProvider === 'turso' ? 'bg-[#191A23] text-white shadow-xs' : 'text-[#64748B] hover:text-[#191A23]'
+                }`}
+              >
+                Turso (libSQL)
+              </button>
+            </div>
+          </div>
+
+          <p className="text-xs text-[#64748B] leading-relaxed">
+            Connect your free cloud database to ensure your PPTs, AI notes, and subjects are stored in the cloud. Anyone opening your Vercel link (including your professor) will immediately see live updates in real time.
+          </p>
+
+          {cloudProvider === 'supabase' ? (
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-[#191A23] mb-1">
+                    Supabase Project URL
+                  </label>
+                  <input
+                    type="text"
+                    value={supabaseUrl}
+                    onChange={(e) => setSupabaseUrl(e.target.value)}
+                    placeholder="https://xyzcompany.supabase.co"
+                    className="w-full px-3.5 py-2.5 bg-[#F8F9FA] border border-[#E2E8F0] rounded-xl text-xs font-semibold text-[#191A23] outline-none placeholder:text-[#94A3B8]"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-[#191A23] mb-1">
+                    Supabase Anon Public Key (anon key)
+                  </label>
+                  <input
+                    type="password"
+                    value={supabaseKey}
+                    onChange={(e) => setSupabaseKey(e.target.value)}
+                    placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                    className="w-full px-3.5 py-2.5 bg-[#F8F9FA] border border-[#E2E8F0] rounded-xl text-xs font-mono text-[#191A23] outline-none placeholder:text-[#94A3B8]"
+                  />
+                </div>
+              </div>
+
+              <div className="p-4 rounded-2xl bg-amber-50/70 border border-amber-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                <div>
+                  <span className="font-extrabold text-amber-900">5-Second Database Setup:</span>
+                  <p className="text-[11px] text-amber-800 mt-0.5">
+                    Click copy and paste this into your Supabase Dashboard $\rightarrow$ SQL Editor to create the permanent table:
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleCopySql}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-amber-300 text-amber-900 rounded-xl font-bold text-xs hover:bg-amber-100 transition-colors shrink-0 cursor-pointer shadow-xs"
+                >
+                  <Copy className="w-3.5 h-3.5" />
+                  <span>{copiedSql ? 'Copied to Clipboard!' : 'Copy Setup SQL'}</span>
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-bold text-[#191A23] mb-1">
+                  Turso Database URL
+                </label>
+                <input
+                  type="text"
+                  value={tursoUrl}
+                  onChange={(e) => setTursoUrl(e.target.value)}
+                  placeholder="libsql://your-db-name.turso.io"
+                  className="w-full px-3.5 py-2.5 bg-[#F8F9FA] border border-[#E2E8F0] rounded-xl text-xs font-semibold text-[#191A23] outline-none placeholder:text-[#94A3B8]"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-[#191A23] mb-1">
+                  Turso Auth Token
+                </label>
+                <input
+                  type="password"
+                  value={tursoToken}
+                  onChange={(e) => setTursoToken(e.target.value)}
+                  placeholder="eyJhbGciOi..."
+                  className="w-full px-3.5 py-2.5 bg-[#F8F9FA] border border-[#E2E8F0] rounded-xl text-xs font-mono text-[#191A23] outline-none placeholder:text-[#94A3B8]"
+                />
+              </div>
+            </div>
+          )}
+
+          <div className="flex flex-wrap items-center gap-3 pt-2">
+            <button
+              type="button"
+              onClick={handleTestCloudConnection}
+              disabled={cloudStatus?.loading}
+              className="flex items-center gap-2 bg-[#191A23] hover:bg-black text-white px-4 py-2.5 rounded-xl font-bold text-xs transition-colors cursor-pointer disabled:opacity-50"
+            >
+              {cloudStatus?.loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Cloud className="w-4 h-4" />}
+              <span>Test Cloud Connection</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleMigrateAllToCloud}
+              disabled={cloudSyncStatus?.loading}
+              className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 rounded-xl font-bold text-xs transition-colors cursor-pointer shadow-xs disabled:opacity-50"
+            >
+              {cloudSyncStatus?.loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <CloudUpload className="w-4 h-4" />}
+              <span>1-Click Sync All Courses to Cloud</span>
+            </button>
+          </div>
+
+          {cloudStatus && (
+            <div
+              className={`p-3 rounded-xl text-xs font-semibold flex items-center gap-2 ${
+                cloudStatus.success
+                  ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                  : 'bg-red-50 text-red-800 border border-red-200'
+              }`}
+            >
+              {cloudStatus.success ? (
+                <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+              ) : (
+                <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+              )}
+              <span>{cloudStatus.message}</span>
+            </div>
+          )}
+
+          {cloudSyncStatus && (
+            <div
+              className={`p-3 rounded-xl text-xs font-semibold flex items-center gap-2 ${
+                cloudSyncStatus.success
+                  ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                  : 'bg-red-50 text-red-800 border border-red-200'
+              }`}
+            >
+              {cloudSyncStatus.success ? (
+                <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+              ) : (
+                <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+              )}
+              <span>{cloudSyncStatus.message}</span>
+            </div>
+          )}
         </div>
 
         {/* Data Persistence, Backup & Restore Card */}

@@ -2,6 +2,7 @@
 // Ensures 100% functionality without backend server dependencies.
 import { extractFileContent } from './fileExtractor';
 import { INITIAL_DATA } from './initialData';
+import { cloudService } from './cloudService';
 
 const STORAGE_KEYS = {
   SUBJECTS: 'mls_subjects',
@@ -183,6 +184,11 @@ function getStored(key, defaultValue = []) {
 function setStored(key, value) {
   // Always persist to high-capacity IndexedDB (unlimited MBs)
   idbSet(key, value);
+
+  // Background sync to Cloud Database (Supabase / Turso) if enabled
+  if (cloudService && cloudService.isConfigured()) {
+    cloudService.saveCloudCollection(key, value).catch(() => {});
+  }
 
   // Also persist to localStorage with quota-safe protection
   try {
