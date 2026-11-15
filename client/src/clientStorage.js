@@ -95,7 +95,16 @@ async function idbSet(key, value) {
   }
 }
 
-// Auto-sync between IndexedDB and LocalStorage on page load, and seed initial user data if storage is empty
+function mergeById(existing, initial) {
+  if (!Array.isArray(initial) || initial.length === 0) return existing || [];
+  if (!Array.isArray(existing) || existing.length === 0) return initial;
+  const existingIds = new Set(existing.map((item) => item.id).filter(Boolean));
+  const missing = initial.filter((item) => !item.id || !existingIds.has(item.id));
+  if (missing.length === 0) return existing;
+  return [...existing, ...missing];
+}
+
+// Auto-sync between IndexedDB and LocalStorage on page load, and smart-merge initial courses
 if (typeof window !== 'undefined') {
   (async () => {
     try {
@@ -104,41 +113,24 @@ if (typeof window !== 'undefined') {
         navigator.storage.persist().catch(() => {});
       }
 
-      const idbSubjects = await idbGet(STORAGE_KEYS.SUBJECTS);
-      const localSubjectsStr = localStorage.getItem(STORAGE_KEYS.SUBJECTS);
-      let localSubjects = null;
-      try {
-        localSubjects = localSubjectsStr ? JSON.parse(localSubjectsStr) : null;
-      } catch {}
+      for (const [k, initVal] of Object.entries(INITIAL_MAP)) {
+        const idbVal = await idbGet(k);
+        let localVal = null;
+        try {
+          const s = localStorage.getItem(k);
+          if (s) localVal = JSON.parse(s);
+        } catch {}
 
-      const hasSubjects =
-        (Array.isArray(idbSubjects) && idbSubjects.length > 0) ||
-        (Array.isArray(localSubjects) && localSubjects.length > 0);
+        const current = Array.isArray(localVal) && localVal.length > 0 
+          ? localVal 
+          : (Array.isArray(idbVal) && idbVal.length > 0 ? idbVal : []);
 
-      if (!hasSubjects) {
-        // Fresh start or uninitialized storage: automatically seed Economics course data
-        for (const [k, initVal] of Object.entries(INITIAL_MAP)) {
-          if (initVal && Array.isArray(initVal) && initVal.length > 0) {
-            await idbSet(k, initVal);
-            try {
-              localStorage.setItem(k, JSON.stringify(initVal));
-            } catch {}
-          }
-        }
-      } else {
-        // Sync bi-directionally between IndexedDB and LocalStorage
-        for (const k of Object.values(STORAGE_KEYS)) {
-          const localVal = localStorage.getItem(k);
-          const idbVal = await idbGet(k);
-          if (!localVal && idbVal) {
-            try {
-              localStorage.setItem(k, JSON.stringify(idbVal));
-            } catch {}
-          } else if (localVal && !idbVal) {
-            try {
-              await idbSet(k, JSON.parse(localVal));
-            } catch {}
-          }
+        const merged = mergeById(current, initVal);
+        if (merged.length > 0) {
+          await idbSet(k, merged);
+          try {
+            localStorage.setItem(k, JSON.stringify(merged));
+          } catch {}
         }
       }
     } catch (e) {
@@ -148,23 +140,41 @@ if (typeof window !== 'undefined') {
 }
 
 function getStored(key, defaultValue = []) {
+  let parsed = null;
   try {
     const data = localStorage.getItem(key);
     if (data) {
-      const parsed = JSON.parse(data);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-      if (parsed && !Array.isArray(parsed) && Object.keys(parsed).length > 0) return parsed;
+      parsed = JSON.parse(data);
     }
   } catch {}
 
-  // If empty and initial course data exists for this key, return and seed initial data
-  if (INITIAL_MAP[key] && Array.isArray(INITIAL_MAP[key]) && INITIAL_MAP[key].length > 0) {
-    const seed = INITIAL_MAP[key];
+  const initial = INITIAL_MAP[key];
+
+  if (Array.isArray(parsed)) {
+    if (initial && Array.isArray(initial) && initial.length > 0) {
+      const merged = mergeById(parsed, initial);
+      if (merged.length !== parsed.length) {
+        try {
+          localStorage.setItem(key, JSON.stringify(merged));
+          idbSet(key, merged);
+        } catch {}
+      }
+      return merged;
+    }
+    return parsed;
+  }
+
+  if (parsed && typeof parsed === 'object') {
+    return parsed;
+  }
+
+  // If empty, return and seed initial data
+  if (initial && Array.isArray(initial) && initial.length > 0) {
     try {
-      localStorage.setItem(key, JSON.stringify(seed));
-      idbSet(key, seed);
+      localStorage.setItem(key, JSON.stringify(initial));
+      idbSet(key, initial);
     } catch {}
-    return seed;
+    return initial;
   }
 
   return defaultValue;
