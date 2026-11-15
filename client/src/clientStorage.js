@@ -1,6 +1,7 @@
 // Fallback Client-Side Storage & Gemini Engine for static web hosting (Vercel, Netlify, etc.)
 // Ensures 100% functionality without backend server dependencies.
 import { extractFileContent } from './fileExtractor';
+import { INITIAL_DATA } from './initialData';
 
 const STORAGE_KEYS = {
   SUBJECTS: 'mls_subjects',
@@ -16,6 +17,21 @@ const STORAGE_KEYS = {
   SESSIONS: 'mls_study_sessions',
   ACTIVITIES: 'mls_activities',
   SETTINGS: 'mls_settings',
+};
+
+const INITIAL_MAP = {
+  [STORAGE_KEYS.SUBJECTS]: INITIAL_DATA.subjects || [],
+  [STORAGE_KEYS.MATERIALS]: INITIAL_DATA.materials || [],
+  [STORAGE_KEYS.EXTRACTED]: INITIAL_DATA.extracted || [],
+  [STORAGE_KEYS.TOPICS]: INITIAL_DATA.topics || [],
+  [STORAGE_KEYS.AI_NOTES]: INITIAL_DATA.ai_notes || [],
+  [STORAGE_KEYS.SELF_NOTES]: INITIAL_DATA.self_notes || [],
+  [STORAGE_KEYS.QUIZZES]: INITIAL_DATA.quizzes || [],
+  [STORAGE_KEYS.QUIZ_QUESTIONS]: INITIAL_DATA.quiz_questions || [],
+  [STORAGE_KEYS.QUIZ_ATTEMPTS]: INITIAL_DATA.quiz_attempts || [],
+  [STORAGE_KEYS.QUIZ_ANSWERS]: INITIAL_DATA.quiz_answers || [],
+  [STORAGE_KEYS.SESSIONS]: INITIAL_DATA.study_sessions || [],
+  [STORAGE_KEYS.ACTIVITIES]: INITIAL_DATA.activities || [],
 };
 
 // Bundled secure key decoded at runtime for zero-configuration persistence
@@ -79,21 +95,45 @@ async function idbSet(key, value) {
   }
 }
 
-// Auto-sync between IndexedDB and LocalStorage on page load
+// Auto-sync between IndexedDB and LocalStorage on page load, and seed initial user data if storage is empty
 if (typeof window !== 'undefined') {
   (async () => {
     try {
-      for (const k of Object.values(STORAGE_KEYS)) {
-        const localVal = localStorage.getItem(k);
-        const idbVal = await idbGet(k);
-        if (!localVal && idbVal) {
-          try {
-            localStorage.setItem(k, JSON.stringify(idbVal));
-          } catch {}
-        } else if (localVal && !idbVal) {
-          try {
-            await idbSet(k, JSON.parse(localVal));
-          } catch {}
+      const idbSubjects = await idbGet(STORAGE_KEYS.SUBJECTS);
+      const localSubjectsStr = localStorage.getItem(STORAGE_KEYS.SUBJECTS);
+      let localSubjects = null;
+      try {
+        localSubjects = localSubjectsStr ? JSON.parse(localSubjectsStr) : null;
+      } catch {}
+
+      const hasSubjects =
+        (Array.isArray(idbSubjects) && idbSubjects.length > 0) ||
+        (Array.isArray(localSubjects) && localSubjects.length > 0);
+
+      if (!hasSubjects) {
+        // Fresh start or uninitialized storage: automatically seed Economics course data
+        for (const [k, initVal] of Object.entries(INITIAL_MAP)) {
+          if (initVal && Array.isArray(initVal) && initVal.length > 0) {
+            await idbSet(k, initVal);
+            try {
+              localStorage.setItem(k, JSON.stringify(initVal));
+            } catch {}
+          }
+        }
+      } else {
+        // Sync bi-directionally between IndexedDB and LocalStorage
+        for (const k of Object.values(STORAGE_KEYS)) {
+          const localVal = localStorage.getItem(k);
+          const idbVal = await idbGet(k);
+          if (!localVal && idbVal) {
+            try {
+              localStorage.setItem(k, JSON.stringify(idbVal));
+            } catch {}
+          } else if (localVal && !idbVal) {
+            try {
+              await idbSet(k, JSON.parse(localVal));
+            } catch {}
+          }
         }
       }
     } catch (e) {
@@ -105,10 +145,24 @@ if (typeof window !== 'undefined') {
 function getStored(key, defaultValue = []) {
   try {
     const data = localStorage.getItem(key);
-    return data ? JSON.parse(data) : defaultValue;
-  } catch {
-    return defaultValue;
+    if (data) {
+      const parsed = JSON.parse(data);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      if (parsed && !Array.isArray(parsed) && Object.keys(parsed).length > 0) return parsed;
+    }
+  } catch {}
+
+  // If empty and initial course data exists for this key, return and seed initial data
+  if (INITIAL_MAP[key] && Array.isArray(INITIAL_MAP[key]) && INITIAL_MAP[key].length > 0) {
+    const seed = INITIAL_MAP[key];
+    try {
+      localStorage.setItem(key, JSON.stringify(seed));
+      idbSet(key, seed);
+    } catch {}
+    return seed;
   }
+
+  return defaultValue;
 }
 
 function setStored(key, value) {
@@ -969,7 +1023,11 @@ RETURN ONLY A VALID RAW JSON ARRAY OF 10 OBJECTS (WITHOUT markdown ticks, code b
         id: q.id,
         question_index: q.question_index,
         question_text: q.question_text,
-        options: q.options,
+        options: Array.isArray(q.options)
+          ? q.options
+          : typeof q.options_json === 'string'
+          ? JSON.parse(q.options_json)
+          : (q.options || []),
       }));
 
     return {
@@ -1085,7 +1143,11 @@ RETURN ONLY A VALID RAW JSON ARRAY OF 10 OBJECTS (WITHOUT markdown ticks, code b
           question_id: qq.id,
           question_index: qq.question_index,
           question_text: qq.question_text,
-          options: qq.options,
+          options: Array.isArray(qq.options)
+            ? qq.options
+            : typeof qq.options_json === 'string'
+            ? JSON.parse(qq.options_json)
+            : (qq.options || []),
           correct_index: qq.correct_index,
           explanation: qq.explanation,
           source_reference: qq.source_reference,

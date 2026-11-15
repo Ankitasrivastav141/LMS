@@ -136,6 +136,30 @@ export default function SubjectWorkspaceView({ subjectId, initialTab = 'overview
     }
   };
 
+  // Ensure Self Notes tab is never blank when navigated to
+  useEffect(() => {
+    if (activeTab === 'self-notes' && !loading) {
+      if (!activeSelfNote && selfNotes.length > 0) {
+        setActiveSelfNote(selfNotes[0]);
+        setSelfNoteTitle(selfNotes[0].title || 'Untitled Note');
+        setSelfNoteContent(selfNotes[0].content || '');
+        setSelfNoteSavedStatus('Saved');
+      } else if (selfNotes.length === 0) {
+        handleCreateNewSelfNote();
+      }
+    }
+  }, [activeTab, selfNotes.length, activeSelfNote, loading]);
+
+  // Ensure AI Notes tab selects the first note automatically
+  useEffect(() => {
+    if (activeTab === 'ai-notes' && !loading) {
+      if (!selectedNote && aiNotes.length > 0) {
+        setSelectedNote(aiNotes[0]);
+        setEditedNoteContent(aiNotes[0].content || '');
+      }
+    }
+  }, [activeTab, aiNotes.length, selectedNote, loading]);
+
   // ---------------- MATERIALS ----------------
   const handleFileUpload = async (files) => {
     if (!files || files.length === 0) return;
